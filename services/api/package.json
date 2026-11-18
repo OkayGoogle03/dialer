@@ -5,10 +5,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
-    "start:dev": "node --env-file-if-exists=../../.env --watch -r ts-node/register/transpile-only -r tsconfig-paths/register src/main.ts",
+    "start:dev": "node --env-file-if-exists=../../.env --watch -r ts-node/register/transpile-only src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --env-file-if-exists=../../.env node_modules/jest/bin/jest.js --runInBand",
-    "provision": "node --env-file-if-exists=../../.env -r ts-node/register/transpile-only -r tsconfig-paths/register src/cli/provision-tenant.ts"
+    "provision": "node --env-file-if-exists=../../.env -r ts-node/register/transpile-only src/cli/provision-tenant.ts"
   },
   "jest": {
     "preset": "ts-jest",

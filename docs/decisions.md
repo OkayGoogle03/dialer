@@ -34,3 +34,20 @@ D-002 now uses `database/dbctl.mjs`. D-003 (RLS), D-004 (BYPASSRLS role), D-005 
 | D-024 | Consumers: `processed_events` marker and handler in one DB transaction; after `maxDeliver`, dead-letter to `DIALER_DLQ` | Exactly-once effects over at-least-once delivery. |
 | D-025 | Shared packages built to CJS+ESM; API/Jest/Vite resolve them from source | No pre-build in dev. |
 | D-026 | Anti-escalation: an actor may only grant, or modify holders of, permissions the actor holds | Stops user-managers minting admins. |
+
+## Batch 3 - master data, Excel caller import, outbound routing
+The spec for this batch said PostgreSQL; the project database is TiDB (D-014), so TiDB was kept.
+
+| ID | Decision | Reason |
+|---|---|---|
+| D-027 | "SIP trunk" = the existing `tenant_sip_providers` table (extended in 0006); "service provider" = new `service_providers` business entity above it | Avoids a duplicate trunk table; provider = routing/priority/limits, trunk = connection + encrypted credentials. |
+| D-028 | `provider_dids` is the DID master; the older `caller_ids` table (campaign FK) is left untouched | `caller_ids` has no provider link; changing it would break the campaign schema. |
+| D-029 | Anything that could carry a call must be *verified*: trunk (test + admin confirm), DID (admin confirm), call server (real ARI check). Editing connection settings resets verification and deactivates. Routing refuses unverified resources | Requirement "never mark unverified provider/DID/server operational". Trunk "verified" = reachable + admin attestation; SIP registration is not proven (Phase 2). |
+| D-030 | Excel import is two-phase: preview (read-only) -> approve proposals (creates Pending records, never technical config) -> confirm (re-validates with `allowProposals=false`) | Nothing is created implicitly; confirm cannot import rows whose master data was not approved. |
+| D-031 | `.xlsx` only (user decision); header row checked exactly and independently of worksheet protection; template samples live on the Instructions sheet, not the data sheet | `.xls` has no maintained safe parser; samples in the data sheet would be imported by accident. |
+| D-032 | Prefix = dial prefix prepended to the destination number for that assignment (+E.164 input is already international) | User had no preference; this is the common dialer meaning. DID stays the caller ID. |
+| D-033 | Concurrency reservation: row locks in fixed order (provider, trunk, DID, server, process) + **locking** count read + insert, then adapter call outside the transaction; deadlock retry | TiDB plain reads use the transaction-start snapshot, so a non-locking count let 6/6 parallel calls through a limit of 2 (found by test). |
+| D-034 | Uncertain call outcomes (timeout after send) are never retried and are reported as `uncertain`; only gateway failures (500/502/503/504, ARI unreachable) fail over | Avoids duplicate calls. |
+| D-035 | Telephony behind `TelephonyAdapter`; `AriTelephonyAdapter` implements ARI HTTP originate/hangup but is only verified against a local stub | No Asterisk or SIP trunk available. |
+| D-036 | Connectivity probes allow private ranges (Asterisk is usually internal) but refuse link-local/cloud-metadata addresses; admin-only, rate limited | SSRF mitigation without breaking the normal deployment. |
+| D-037 | `caller_import:manage` (supervisor + admin) lets approval create Pending providers/processes/servers/DIDs; activating them needs `sip_providers:manage` / `call_servers:manage` | Imports can propose, only admins can make anything operational. |

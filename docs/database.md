@@ -26,3 +26,6 @@ pnpm db:status
 
 ## Migrations
 0001 identity/RBAC/audit/platform_admins · 0002 telephony · 0003 contact centre · 0004 AI · 0005 billing, outbox, processed_events, idempotency_keys.
+
+### 0006 master data, import, routing
+service_providers, call_servers, provider_dids, outbound_processes, process_provider/did/server_assignments, caller_import_batches/records, caller_assignments, outbound_calls; `tenant_sip_providers` (the trunk table) gains realm, outbound proxy, codecs, RTP, verification and registration columns and a link to service_providers. New permissions: master_data:read, processes:manage, call_servers:manage, caller_import:manage (backfilled into existing tenants' system roles). Not built: sip_accounts, provider_registrations, dial_plans (dial plan is JSON on the process), outbound_routes, provider_usage, provider_health (health lives on the trunk row; usage is derived from outbound_calls).

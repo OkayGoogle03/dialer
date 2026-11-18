@@ -1,7 +1,7 @@
 # Project Status
 
-**Current phase:** 1 — Foundation (batches 1–2 done; two verification gaps below block "Phase 1 verified")
-**Last updated:** 2026-11-18
+**Current phase:** 1 - Foundation + Batch 3 (master data, Excel caller import, outbound routing core) built and tested; Phase 1 still has two verification gaps (see below)
+**Last updated:** 2026-11-19
 
 ## Database change (Batch 2)
 At the user's direction the database is **TiDB Cloud (MySQL 8 compatible)**, replacing PostgreSQL. TiDB has no row-level security, so tenant isolation is now enforced in application code + schema + DB grants (see decisions D-014…D-020). Migrations were rewritten for TiDB and applied to `dev_dialer`; tests run against `dev_dialer_test` on the same cluster.
@@ -44,3 +44,26 @@ Phase 2 — Telephony core: Asterisk + Kamailio, ARI adapter, SIP provider manag
 - No RLS: a developer bypassing `Database.withTenant` (e.g. a raw pool) could leak data. Mitigations: guard, lint rule banning positional placeholders, grants, isolation tests, `TENANT_TABLES` completeness test.
 - Shared TiDB cluster: other projects live on it. Only `dev_dialer` and `dev_dialer_test` are touched; never `SET GLOBAL`.
 - `trust proxy` = 1 hop; must match real ingress.
+
+## Batch 3 - Master data, Excel caller import, outbound routing (2026-11-19)
+
+### Implemented and verified
+| Area | Status |
+|---|---|
+| Migration 0006 (+ permissions, backfill) | Applied to dev_dialer and dev_dialer_test on TiDB |
+| Master data CRUD + UI | Providers, trunks, DIDs, processes, call servers, process assignments. Credentials encrypted (AES-256-GCM), write-only. Verify -> activate lifecycle; edits reset verification. Tested on TiDB (14 tests) |
+| Excel template | `Project_Dialer_Caller_Template.xlsx`: 5 fixed headers, locked, frozen, filter, data cells unlocked/text; dropdowns only from tenant data; Instructions sheet. Structure asserted in tests (raw XML) |
+| Excel parse/validate/discover | Exact header check; formulas, extra columns, bad format, size/row limits rejected. Pure evaluation of 5000 rows < 2 s. Preview -> approve (Pending records only) -> confirm; valid-only and strict modes; transaction rollback proven by fault injection; error report CSV; paginated history; rollback of a batch. 2000-row file imported end to end in about 13 s |
+| Outbound routing | Process -> provider -> trunk -> DID -> prefix -> call server; priority / weighted / manual; failover on gateway errors only; no retry on uncertain outcomes; provider/trunk/DID/server/process concurrency enforced atomically (6 parallel calls vs limit 2 => exactly 2 accepted); idempotency key; events in outbox; stats |
+| UI | Caller Excel Import, SIP Providers (+trunks), DIDs, Processes (+assignments), Call Servers, Dialer. Import flow exercised in a real browser (upload, discovery, approve, confirm, history, dialer preview) |
+
+### Test and build results (actually run, TiDB cluster)
+API 142/142 passed (13 suites). Packages: validation 4, event-schemas 4. Web: 5. ESLint clean. `tsc` clean. API and web production builds OK; the compiled API starts and reports healthy.
+
+### NOT verified / limitations
+1. **No live SIP.** No SIP trunk, Asterisk or Docker available. Routing is tested with a mock adapter; the ARI adapter and ARI connectivity check are tested only against a local stub server. Trunk "test" is a TCP/TLS reachability probe (UDP cannot be probed); "verified" is an admin attestation. Registration status stays `unknown`. No claim of working carrier connectivity.
+2. **Asterisk/PJSIP integration is partial:** PJSIP config generation (validated, masked preview, injection-safe) exists, but nothing writes it to a PBX or reloads it, and no call-state events come back (completion is set by the API hangup only). Call recording is not implemented. Both belong to Phase 2.
+3. **Not built:** .xls support (by decision), sip_accounts / provider_registrations / outbound_routes / provider_usage / provider_health tables, automatic health monitor and circuit-breaker transitions, cross-instance tenant cache invalidation (Redis), usage tracking beyond call counts, destination country restrictions on trunks.
+4. Concurrency: a crashed worker's `initiated` reservation stops counting after 120 s; `ringing`/`answered` rows only clear on hangup (reconciliation arrives with Phase 2 call events).
+5. Still open from Phase 1: NATS JetStream never run against a real server (no Docker); CI workflow never executed; Platform/Roles/Teams screens not browser-tested.
+6. One browser upload returned a 500 from the dev proxy while the dev API was restarting; an identical retry succeeded and curl uploads (direct and proxied) succeeded. Not reproduced.

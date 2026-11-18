@@ -40,3 +40,13 @@ Phase 1: platform tenants, roles, teams. Phase 2: extensions, sip-providers, cal
 | POST | /platform/tenants/:id/suspend, /reactivate | platform admin |
 
 Users now accept `roles` as role keys (including custom roles) and an optional `teamId`; `GET /users` accepts `teamId`. All responses carry `X-Correlation-Id`.
+
+## Added in Batch 3 (all under /api/v1)
+Master data (`master_data:read` to read; `sip_providers:manage` for providers/trunks/DIDs, `processes:manage`, `call_servers:manage` to write):
+`/providers` `/trunks` (+`POST :id/test`, `POST :id/verify`, `GET :id/pjsip-preview`) `/dids` (+`POST :id/verify` body `{confirm:true}`) `/processes` `/call-servers` (+`POST :id/test`) `/process-assignments` (GET `?processId=`, POST add, PUT `:processId` replace).
+Credentials are write-only: responses carry `hasPassword`, never the secret.
+
+Caller import (`caller_import:manage`): `POST|GET /caller-import/template` -> `Project_Dialer_Caller_Template.xlsx`; `POST /caller-import/preview` (multipart field `file`, .xlsx, 5 MB, 5000 rows); `POST /caller-import/approve-master-data`; `POST /caller-import/confirm` (`mode`: `valid_only` | `strict`, 422 when strict is rejected); `GET /caller-import/batches` (paginated); `GET batches/:id`, `/records`, `/errors`, `/download-errors` (CSV); `DELETE batches/:id` (rolls back an imported batch's assignments).
+
+Dialer (`calls:make`): `POST /dialer/route-preview`, `POST /dialer/calls` (202; optional `Idempotency-Key`), `POST /dialer/calls/:id/hangup`, `GET /dialer/calls[/:id]`, `GET /dialer/stats` (`calls:read_all`).
+The spec's `/api/...` paths follow the project convention `/api/v1/...`; the template endpoint accepts POST and GET.

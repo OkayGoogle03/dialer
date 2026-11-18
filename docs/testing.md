@@ -13,7 +13,10 @@ API integration tests prepare `<DB_NAME>_test` on the configured TiDB (migration
 | 2026-11-18 | API on real TiDB: auth-tenancy (16), platform (8), roles-teams (5), isolation (9), events-logging (4), unit (11) | 53/53 passed |
 | 2026-11-18 | packages: validation (4), event-schemas (4); web client (5) | 13/13 passed |
 | 2026-11-18 | ESLint, `tsc` for all workspaces, API + web production builds | clean |
+| 2026-11-19 | Batch 3: master-data (14), caller-import (14), dialer (14) plus unit specs for evaluate, excel, routing, PJSIP and crypto | included in API total 142/142 |
+| 2026-11-19 | Manual browser run on dev TiDB: login, upload, discovery, approve, confirm, history, dialer route preview | passed |
 | — | Real NATS JetStream integration | **not run** |
+| — | Live SIP / real Asterisk | **not possible here; not run** |
 | — | CI workflow execution; browser test of Platform/Roles/Teams screens | **not run** |
 
 ## Load-test plan (Phase 2+)
