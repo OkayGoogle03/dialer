@@ -5,3 +5,4 @@ packages:
 allowBuilds:
   esbuild: true
   "@scarf/scarf": false   # telemetry only
+  workerd: true          # wrangler (Cloudflare deploy tooling) ships this; its postinstall only links the binary
