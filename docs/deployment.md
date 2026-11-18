@@ -21,10 +21,22 @@ Log in at the web app with Company ID `platform` to reach Platform · Tenants.
 - Prometheus + Grafana, centralised JSON logs (already structured), alerting on call failure rate, provider health, RTP quality, event lag.
 - Initial sizing estimates are in the master spec section 10 and must be validated by load tests.
 
+## Configuration (config file + secrets)
+Settings are split in two so nothing sensitive is ever committed:
+
+| Where | What | In git? |
+|---|---|---|
+| `config/app.config.json` | Non-secret settings, with sections `defaults`, `development`, `preview`, `production` (DB host/name/port/TLS/user prefix, log level, token lifetimes, pool size, CORS origins) | yes |
+| Host environment (Vercel -> Settings -> Environment Variables) | The four secrets: `DB_API_PASSWORD`, `DB_PLATFORM_PASSWORD`, `JWT_ACCESS_SECRET`, `CREDENTIALS_ENCRYPTION_KEY` | **never** |
+
+Precedence: a real environment variable always overrides the file. The section is chosen by `APP_ENV`, else Vercel's `VERCEL_ENV` (production / preview / development), else `NODE_ENV`. The loader refuses any secret found in the file. The `production` section is blank on purpose: fill in the production database there; until you do, the API reports exactly which settings are missing instead of using the development database.
+
+Generate the two secrets that can be generated with `pnpm secrets:generate` (the two database passwords come from `pnpm db:setup-roles`). Vercel can import them in one go: in Environment Variables, paste several `NAME=value` lines into the first field.
+
 ## Vercel (web app + API in one project)
 One Vercel project serves the web app (static files from `apps/web/dist`) and the existing Node.js (NestJS) backend as a Vercel Function. `vercel.json` rewrites `/api/*` to `api/index.js`, which loads the compiled app from `services/api/dist`; every other path falls back to the single-page app. The browser talks to one address, so no CORS is needed and the login cookie works.
 
-Project settings (Vercel -> New Project -> import the GitHub repo, root directory `/`, framework "Other"; the install/build commands come from `vercel.json`):
+Project settings (Vercel -> New Project -> import the GitHub repo, **Root Directory `./`**, Application Preset **Other**; the install/build commands come from `vercel.json`):
 
 | Setting | Value |
 |---|---|
@@ -32,16 +44,7 @@ Project settings (Vercel -> New Project -> import the GitHub repo, root director
 | Node.js version | 22.x |
 | Production branch | `main` (the `dev` branch gets preview deployments automatically) |
 | Function region | `sin1`, set in vercel.json: next to a TiDB cluster in Singapore. Every request makes several database round trips, so keep them close |
-
-Environment variables (Project -> Settings -> Environment Variables; mark secrets Sensitive; use different values for Production and Preview, and a **separate production database**):
-
-| Name | Value |
-|---|---|
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_TLS`, `DB_USER_PREFIX` | TiDB connection (`DB_TLS=true`) |
-| `DB_API_PASSWORD`, `DB_PLATFORM_PASSWORD` | the restricted `dialer_api` / `dialer_platform` users from `pnpm db:setup-roles` |
-| `DB_POOL_SIZE` | `3` (every warm function instance keeps its own connections) |
-| `JWT_ACCESS_SECRET` | 48+ random bytes |
-| `CREDENTIALS_ENCRYPTION_KEY` | 32 random bytes, base64; never change it for a database that has saved credentials |
+| Secrets | the four from the table above, set for Production and for Preview (use a separate production database and separate secrets) |
 
 Never put the database **owner** credentials in Vercel; run migrations (`pnpm db:migrate`, `pnpm db:setup-roles`) from your own machine.
 
@@ -51,4 +54,4 @@ Serverless limits to know about:
 - Rate limits and the tenant-status cache are per warm instance (not shared).
 - Cold starts add a second or two to the first request after idle time.
 - The Vercel Hobby (free) plan is for non-commercial use only.
-- Verified only up to the function entry (run locally with a plain Node server); it has not been deployed from Vercel yet.
+- Verified only up to the function entry (run locally with a plain Node server and only the four secrets set); it has not been deployed from Vercel yet.

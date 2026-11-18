@@ -2,13 +2,14 @@ import 'reflect-metadata';
 import { createApp } from './bootstrap';
 import { createLogger } from './common/logging/logger';
 import { loadConfig } from './config/env';
+import { mergeFileConfig } from './config/file-config';
 import { Database, PlatformDatabase } from './database/database';
 import { createPool } from './database/mysql';
 import { NatsPublisher } from './events/nats-publisher';
 import { OutboxRelay } from './events/outbox-relay';
 
 async function main() {
-  const config = loadConfig();
+  const config = loadConfig(mergeFileConfig());
   const logger = createLogger(config.logLevel);
   const db = new Database(createPool(config.db, config.db.apiUser, config.db.apiPassword));
   const platformDb = new PlatformDatabase(createPool(config.db, config.db.platformUser, config.db.platformPassword, 5));

@@ -4,16 +4,24 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build:packages && pnpm --filter @dialer/api build && pnpm --filter @dialer/web build",
   "outputDirectory": "apps/web/dist",
-  "regions": ["sin1"],
+  "regions": [
+    "sin1"
+  ],
   "functions": {
     "api/index.js": {
-      "includeFiles": "services/api/dist/**",
+      "includeFiles": "{services/api/dist/**,config/**}",
       "maxDuration": 30,
       "memory": 1024
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.js" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ]
 }

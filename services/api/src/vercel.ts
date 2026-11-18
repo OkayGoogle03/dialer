@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createApp } from './bootstrap';
 import { createLogger } from './common/logging/logger';
 import { loadConfig } from './config/env';
+import { mergeFileConfig } from './config/file-config';
 import { Database, PlatformDatabase } from './database/database';
 import { createPool } from './database/mysql';
 
@@ -17,7 +18,7 @@ let cached: Promise<Handler> | undefined;
 
 export function getHandler(): Promise<Handler> {
   cached ??= (async () => {
-    const config = loadConfig();
+    const config = loadConfig(mergeFileConfig());
     const logger = createLogger(config.logLevel);
     const poolSize = Number(process.env.DB_POOL_SIZE) || 3;
     const db = new Database(createPool(config.db, config.db.apiUser, config.db.apiPassword, poolSize));

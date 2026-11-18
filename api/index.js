@@ -8,9 +8,12 @@ module.exports = async (req, res) => {
     const handler = await getHandler();
     return handler(req, res);
   } catch (e) {
-    console.error('API failed to start:', e && e.message ? e.message : e);
+    const msg = e && e.message ? String(e.message) : '';
+    console.error('API failed to start:', msg || e);
+    // Configuration errors only ever name the missing/invalid settings (never values), so they are safe to show.
+    const detail = msg.startsWith('Invalid configuration') ? ` ${msg.replace(/:\s*\n\s*-\s*/, ': ').replace(/\s*\n\s*-\s*/g, '; ')}` : '';
     res.statusCode = 503;
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: { status: 503, code: 'API_UNAVAILABLE', message: 'The API failed to start. Check the function logs and the environment variables.' } }));
+    res.end(JSON.stringify({ error: { status: 503, code: 'API_UNAVAILABLE', message: `The API failed to start.${detail || ' Check the function logs.'}` } }));
   }
 };

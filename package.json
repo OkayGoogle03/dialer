@@ -17,7 +17,8 @@
     "db:reset-test": "node --env-file-if-exists=.env database/dbctl.mjs reset-test",
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
-    "build:packages": "pnpm --filter \"./packages/*\" build"
+    "build:packages": "pnpm --filter \"./packages/*\" build",
+    "secrets:generate": "node scripts/generate-secrets.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

@@ -1,0 +1,28 @@
+{
+  "_readme": "Non-secret settings for the API, like a small config server. Precedence: real environment variables (Vercel/shell) override this file. Pick the section by APP_ENV, else VERCEL_ENV (production|preview|development), else NODE_ENV. NEVER put passwords, JWT_ACCESS_SECRET or CREDENTIALS_ENCRYPTION_KEY here: the loader refuses them. Secrets live only in the host environment (see docs/deployment.md).",
+  "defaults": {
+    "LOG_LEVEL": "info",
+    "JWT_ACCESS_TTL_SECONDS": "900",
+    "REFRESH_TTL_DAYS": "30",
+    "TENANT_STATUS_CACHE_SECONDS": "15",
+    "DB_POOL_SIZE": "3",
+    "DB_PORT": "4000",
+    "DB_TLS": "true"
+  },
+  "development": {
+    "DB_HOST": "gateway01.ap-southeast-1.prod.aws.tidbcloud.com",
+    "DB_NAME": "dev_dialer",
+    "DB_USER_PREFIX": "2ZgQZzSW31Ns8t2.",
+    "CORS_ORIGINS": "http://localhost:5173"
+  },
+  "preview": {
+    "DB_HOST": "gateway01.ap-southeast-1.prod.aws.tidbcloud.com",
+    "DB_NAME": "dev_dialer",
+    "DB_USER_PREFIX": "2ZgQZzSW31Ns8t2."
+  },
+  "production": {
+    "DB_HOST": "",
+    "DB_NAME": "",
+    "DB_USER_PREFIX": ""
+  }
+}
