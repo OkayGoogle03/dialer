@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 export const HEADERS = ['Process Name', 'Service Provider', 'DID', 'Prefix', 'Call Server'] as const;
 export const TEMPLATE_FILENAME = 'Project_Dialer_Caller_Template.xlsx';
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-export const MAX_FILE_BYTES = 5 * 1024 * 1024;
+export const MAX_FILE_BYTES = 4 * 1024 * 1024;
 export const MAX_DATA_ROWS = 5000;
 const MAX_SCAN_ROWS = 100_000;
 

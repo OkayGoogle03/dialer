@@ -37,7 +37,7 @@ export class CallerImportService {
     if (/\.xls$/i.test(name)) throw new BadRequestException('Legacy .xls files are not supported. Open the file in Excel and save it as .xlsx.');
     if (!/\.xlsx$/i.test(name)) throw new BadRequestException('Only .xlsx files are supported.');
     if (![XLSX_MIME, 'application/octet-stream', 'application/zip', 'application/x-zip-compressed'].includes(file.mimetype)) throw new BadRequestException('Unsupported file type.');
-    if (file.size > MAX_FILE_BYTES || file.buffer.length > MAX_FILE_BYTES) throw new PayloadTooLargeException('File is too large (limit 5 MB).');
+    if (file.size > MAX_FILE_BYTES || file.buffer.length > MAX_FILE_BYTES) throw new PayloadTooLargeException('File is too large (limit 4 MB).');
 
     let parsed;
     try {

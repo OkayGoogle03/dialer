@@ -4,7 +4,7 @@ import { api, ApiError, saveBlob } from '../api/client';
 import type { BatchDetail, BatchRow, ImportRecord, Paged, Proposals } from '../api/types';
 import { errText, Notice } from '../components/kit';
 
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_BYTES = 4 * 1024 * 1024;
 type Keys = { processes: Set<string>; providers: Set<string>; callServers: Set<string>; dids: Set<string> };
 const allKeys = (p: Proposals | null): Keys => ({
   processes: new Set(p?.processes.map((x) => x.key)), providers: new Set(p?.providers.map((x) => x.key)),
@@ -52,7 +52,7 @@ export function CallerImportPage() {
     setError(null); setNotice(null); setDone(false); setDetail(null); setRows(null);
     if (/\.xls$/i.test(file.name)) return setError('Legacy .xls files are not supported. Save the file as .xlsx in Excel and upload it again.');
     if (!/\.xlsx$/i.test(file.name)) return setError('Only .xlsx files are supported.');
-    if (file.size > MAX_BYTES) return setError('The file is larger than 5 MB.');
+    if (file.size > MAX_BYTES) return setError('The file is larger than 4 MB.');
     setProgress(0);
     try {
       const d = await api.upload<BatchDetail>('/caller-import/preview', file, setProgress);
@@ -114,7 +114,7 @@ export function CallerImportPage() {
       <div className={`dropzone${drag ? ' drag' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={onDrop}
         role="button" tabIndex={0} onClick={() => input.current?.click()} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current?.click()} aria-label="Upload Excel file">
         <strong>Drag and drop your Excel file here</strong>
-        <span className="hint">or click to choose a file · .xlsx only · max 5 MB · up to 5,000 records</span>
+        <span className="hint">or click to choose a file · .xlsx only · max 4 MB · up to 5,000 records</span>
         <Button type="button" variant="secondary" onClick={(e) => { e.stopPropagation(); input.current?.click(); }}>Upload Excel</Button>
         <input ref={input} type="file" hidden accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => handleFile(e.target.files?.[0])} />
         {progress !== null && <div className="progress" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}><div style={{ width: `${progress}%` }} /></div>}

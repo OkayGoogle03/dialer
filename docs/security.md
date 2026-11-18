@@ -10,7 +10,7 @@
 - **Audit:** login success/failure/lockout, refresh-token reuse, logout, user create/update, branding update — written in the same transaction as the change; audit table is append-only for the runtime role.
 
 - **Credentials (Batch 3):** SIP trunk and ARI passwords are AES-256-GCM encrypted at rest (`CREDENTIALS_ENCRYPTION_KEY`), write-only in every API, absent from logs and audit metadata (tested), decrypted only to run a connectivity check or originate a call. PJSIP config generation rejects values that could inject sections/lines and masks secrets in previews.
-- **Uploads:** extension + MIME + ZIP magic-byte checks, 5 MB / 5000-row limits, no formulas accepted, tenant comes only from the login token (an Excel `Tenant` column is rejected). Error reports neutralise CSV/formula injection.
+- **Uploads:** extension + MIME + ZIP magic-byte checks, 4 MB / 5000-row limits, no formulas accepted, tenant comes only from the login token (an Excel `Tenant` column is rejected). Error reports neutralise CSV/formula injection.
 - **Probes:** see D-036 (SSRF).
 
 ## Planned
