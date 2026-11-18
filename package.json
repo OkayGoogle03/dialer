@@ -1,0 +1,31 @@
+{
+  "name": "project-dialer",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:api": "pnpm build:packages && pnpm --filter @dialer/api start:dev",
+    "dev:web": "pnpm --filter @dialer/web dev",
+    "build": "pnpm build:packages && pnpm --filter @dialer/api --filter @dialer/web build",
+    "test": "pnpm -r --if-present test",
+    "db:migrate": "node --env-file-if-exists=.env database/dbctl.mjs migrate",
+    "db:setup-roles": "node --env-file-if-exists=.env database/dbctl.mjs setup-roles",
+    "db:status": "node --env-file-if-exists=.env database/dbctl.mjs status",
+    "db:reset-test": "node --env-file-if-exists=.env database/dbctl.mjs reset-test",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "build:packages": "pnpm --filter \"./packages/*\" build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.5.0",
+    "mysql2": "^3.24.6",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.73.0"
+  }
+}

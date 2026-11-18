@@ -1,0 +1,24 @@
+# Local dependencies. The database is TiDB Cloud (see .env.example); no local database container.
+# Telephony (Asterisk/Kamailio) is added in Phase 2.
+name: project-dialer
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  nats:
+    image: nats:2.11-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports: ["127.0.0.1:4222:4222", "127.0.0.1:8222:8222"]
+    volumes: [natsdata:/data]
+
+volumes:
+  redisdata:
+  natsdata:

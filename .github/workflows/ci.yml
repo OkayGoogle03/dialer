@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, typecheck, build, test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      # TiDB (MySQL-compatible), same engine family as the TiDB Cloud dev cluster. No TLS / no user prefix.
+      tidb:
+        image: pingcap/tidb:v8.5.3
+        ports: ["4000:4000"]
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "4000"
+      DB_NAME: ci_dialer
+      DB_TLS: "false"
+      DB_OWNER_USER: root
+      DB_OWNER_PASSWORD: ""
+      DB_USER_PREFIX: ""
+      DB_API_PASSWORD: ci-api-password-0123456789
+      DB_PLATFORM_PASSWORD: ci-platform-password-0123456789
+      TEST_DB_RESET: "true"
+      NATS_URL: nats://127.0.0.1:4222
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Start NATS JetStream
+        # GitHub service containers cannot pass command args, so run it directly.
+        run: docker run -d --name nats -p 4222:4222 nats:2.11-alpine -js
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build shared packages
+        run: pnpm build:packages
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Wait for TiDB
+        run: |
+          for i in $(seq 1 60); do
+            node -e "require('mysql2/promise').createConnection({host:'127.0.0.1',port:4000,user:'root'}).then(c=>c.end()).then(()=>process.exit(0),()=>process.exit(1))" && exit 0
+            sleep 2
+          done
+          echo "TiDB did not become ready" && exit 1
+
+      - name: Migrations (fresh DB, then idempotent re-run)
+        run: |
+          pnpm db:migrate
+          pnpm db:migrate
+          pnpm db:setup-roles
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm --filter @dialer/api --filter @dialer/web build
