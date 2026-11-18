@@ -232,6 +232,11 @@ describe('Outbound dialer: routing from imported caller assignments (mock teleph
     expect((await t.http.get('/api/v1/dialer/calls').set(bearer(ag2)).expect(200)).body.items.some((x: { id: string }) => x.id === mine.body.id)).toBe(false);
     await t.http.post(`/api/v1/dialer/calls/${mine.body.id}/hangup`).set(bearer(ag2)).expect(403);
     await t.http.get('/api/v1/dialer/stats').set(bearer(ag1)).expect(403);
+    // agents pick a process through the dialer endpoint, without master-data access
+    await t.http.get('/api/v1/processes').set(bearer(ag1)).expect(403);
+    const list = await t.http.get('/api/v1/dialer/processes').set(bearer(ag1)).expect(200);
+    expect(list.body.items).toEqual([{ id: s.proc.id, name: s.proc.name }]);
+    expect((await t.http.get('/api/v1/dialer/processes').set(bearer(b)).expect(200)).body.items).toEqual([]);
     const ended = await t.http.post(`/api/v1/dialer/calls/${mine.body.id}/hangup`).set(bearer(ag1)).expect(200);
     expect(ended.body.status).toBe('completed');
     expect((await t.http.post(`/api/v1/dialer/calls/${mine.body.id}/hangup`).set(bearer(ag1)).expect(200)).body.status).toBe('completed'); // idempotent

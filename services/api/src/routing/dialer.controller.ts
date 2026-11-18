@@ -17,6 +17,10 @@ const statsSchema = z.object({ days: z.coerce.number().int().min(1).max(90).defa
 export class DialerController {
   constructor(private readonly dialer: DialerService) {}
 
+  /** Minimal process list for the dialer screen: agents can place calls without having master-data access. */
+  @Get('processes') @RequirePermissions('calls:make')
+  processes(@CurrentUser() u: AuthUser) { return this.dialer.listProcesses(u); }
+
   @Post('route-preview') @HttpCode(200) @RequirePermissions('calls:make')
   preview(@CurrentUser() u: AuthUser, @Body(new ZodPipe(callSchema)) dto: z.infer<typeof callSchema>) { return this.dialer.previewRoute(u, dto); }
 

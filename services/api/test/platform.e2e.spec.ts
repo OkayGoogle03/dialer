@@ -19,9 +19,16 @@ describe('Platform Super Admin (TiDB)', () => {
 
   afterAll(async () => t?.close());
 
-  it('platform admin token carries the platform flag', async () => {
+  it('platform admin token carries the platform flag and NO tenant permissions', async () => {
     const me = await t.http.get('/api/v1/auth/me').set(bearer(rootTok)).expect(200);
-    expect(me.body.isPlatformAdmin).toBe(true);
+    expect(me.body).toMatchObject({ isPlatformAdmin: true, roles: ['platform_admin'], permissions: [] });
+  });
+
+  it('a super admin is not a tenant user: tenant modules are forbidden even in the platform tenant', async () => {
+    for (const path of ['/users', '/roles', '/teams', '/providers', '/processes', '/caller-import/batches', '/dialer/calls']) {
+      expect({ path, status: (await t.http.get(`/api/v1${path}`).set(bearer(rootTok))).status }).toEqual({ path, status: 403 });
+    }
+    await t.http.post('/api/v1/dialer/calls').set(bearer(rootTok)).send({ processId: tenantId, destination: '9876543210' }).expect(403);
   });
 
   it('tenant admins (even with every tenant permission) cannot reach platform routes', async () => {

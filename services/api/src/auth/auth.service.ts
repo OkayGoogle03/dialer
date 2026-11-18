@@ -157,8 +157,12 @@ export class AuthService {
         WHERE pa.tenant_id = :tenantId AND pa.user_id = :uid`,
       { uid: userId },
     );
-    const claims: AccessClaims = { sub: userId, tid: tenantId, roles: roles.map((r) => r.key), perms: perms.map((p) => p.permission_key) };
-    if (pa.length) claims.pa = true;
+    // A platform super admin is a different kind of account from a tenant user: it carries NO tenant permissions, only the
+    // platform flag (platform routes additionally re-check platform_admins on every request). Tenant users never get `pa`.
+    const isPlatformAdmin = pa.length > 0;
+    const claims: AccessClaims = isPlatformAdmin
+      ? { sub: userId, tid: tenantId, roles: ['platform_admin'], perms: [], pa: true }
+      : { sub: userId, tid: tenantId, roles: roles.map((r) => r.key), perms: perms.map((p) => p.permission_key) };
     const accessToken = await this.jwt.signAsync(claims, { expiresIn: this.config.jwtAccessTtlSeconds, algorithm: 'HS256' });
 
     const tokenId = randomUUID();

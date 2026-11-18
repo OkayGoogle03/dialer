@@ -1,6 +1,6 @@
 import { StrictMode, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Shell } from './components/Shell';
 import { BrandingPage } from './pages/BrandingPage';
@@ -27,6 +27,12 @@ function RequireAuth({ children, perm }: { children: ReactNode; perm?: string })
   return <>{children}</>;
 }
 
+/** Layout route for every tenant screen: a platform super admin has no tenant, so they are sent to the platform console. */
+function TenantOnly() {
+  const { me } = useAuth();
+  return me?.isPlatformAdmin ? <Navigate to="/platform/tenants" replace /> : <Outlet />;
+}
+
 function RequirePlatform({ children }: { children: ReactNode }) {
   const { me } = useAuth();
   return me?.isPlatformAdmin ? <>{children}</> : <div className="error" role="alert">Platform administrator access required.</div>;
@@ -40,11 +46,12 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route element={<RequireAuth><Shell /></RequireAuth>}>
+            <Route path="platform/tenants" element={<RequirePlatform><PlatformTenantsPage /></RequirePlatform>} />
+            <Route element={<TenantOnly />}>
             <Route index element={<DashboardPage />} />
             <Route path="users" element={<RequireAuth perm="users:read"><UsersPage /></RequireAuth>} />
             <Route path="teams" element={<RequireAuth perm="users:read"><TeamsPage /></RequireAuth>} />
             <Route path="roles" element={<RequireAuth perm="roles:manage"><RolesPage /></RequireAuth>} />
-            <Route path="platform/tenants" element={<RequirePlatform><PlatformTenantsPage /></RequirePlatform>} />
             <Route path="providers" element={<RequireAuth perm="master_data:read"><ProvidersPage /></RequireAuth>} />
             <Route path="dids" element={<RequireAuth perm="master_data:read"><DidsPage /></RequireAuth>} />
             <Route path="processes" element={<RequireAuth perm="master_data:read"><ProcessesPage /></RequireAuth>} />
@@ -52,6 +59,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="caller-import" element={<RequireAuth perm="caller_import:manage"><CallerImportPage /></RequireAuth>} />
             <Route path="dialer" element={<RequireAuth perm="calls:make"><DialerPage /></RequireAuth>} />
             <Route path="settings/branding" element={<RequireAuth perm="branding:manage"><BrandingPage /></RequireAuth>} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

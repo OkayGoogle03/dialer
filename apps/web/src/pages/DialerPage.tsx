@@ -1,12 +1,12 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, DataTable, PageHeader, SelectField, TextField } from '@dialer/ui';
 import { api } from '../api/client';
-import type { CallView, Paged, ProcessView, RoutePreview } from '../api/types';
+import type { CallView, Paged, RoutePreview } from '../api/types';
 import { errText, Notice, statusTone } from '../components/kit';
 
 /** Manual outbound calling. Placing a call is always an explicit action here; imports never start calls. */
 export function DialerPage() {
-  const [processes, setProcesses] = useState<ProcessView[]>([]);
+  const [processes, setProcesses] = useState<{ id: string; name: string }[]>([]);
   const [processId, setProcessId] = useState('');
   const [destination, setDestination] = useState('');
   const [preview, setPreview] = useState<RoutePreview | null>(null);
@@ -19,7 +19,7 @@ export function DialerPage() {
     try { setCalls(await api.get<Paged<CallView>>('/dialer/calls?limit=20')); } catch (e) { setError(errText(e, 'Failed to load calls')); }
   }, []);
   useEffect(() => {
-    api.get<Paged<ProcessView>>('/processes?limit=200').then((r) => { setProcesses(r.items); setProcessId((id) => id || r.items.find((p) => p.status === 'active')?.id || ''); }).catch((e) => setError(errText(e, 'Failed to load processes')));
+    api.get<{ items: { id: string; name: string }[] }>('/dialer/processes').then((r) => { setProcesses(r.items); setProcessId((id) => id || r.items[0]?.id || ''); }).catch((e) => setError(errText(e, 'Failed to load processes')));
     loadCalls();
   }, [loadCalls]);
 
@@ -53,7 +53,7 @@ export function DialerPage() {
       {info && <Alert tone="success">{info}</Alert>}
       <Card title="New call">
         <form onSubmit={doPreview} style={{ maxWidth: 480 }} noValidate>
-          <SelectField label="Process" value={processId} onChange={(e) => { setProcessId(e.target.value); setPreview(null); }} options={[{ value: '', label: 'Select…' }, ...processes.map((p) => ({ value: p.id, label: `${p.name}${p.status !== 'active' ? ' (disabled)' : ''}` }))]} />
+          <SelectField label="Process" value={processId} onChange={(e) => { setProcessId(e.target.value); setPreview(null); }} options={[{ value: '', label: 'Select…' }, ...processes.map((p) => ({ value: p.id, label: p.name }))]} />
           <TextField label="Destination number" value={destination} onChange={(e) => { setDestination(e.target.value); setPreview(null); }} hint="National number, or +E.164 for an international number" autoComplete="off" inputMode="tel" />
           <div className="row">
             <Button type="submit" variant="secondary" busy={busy === 'preview'} disabled={!processId || destination.trim().length < 3}>Preview route</Button>

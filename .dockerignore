@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+**/coverage
+**/*.log
+**/tsconfig.tsbuildinfo
+apps/web/src
+apps/web/public
+docs
+database
+infrastructure

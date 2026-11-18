@@ -31,6 +31,17 @@ export class DialerService {
     private readonly audit: AuditService,
   ) {}
 
+  /** Active processes that have at least one caller assignment (id + name only). */
+  listProcesses(actor: AuthUser) {
+    return this.db.withTenant(actor.tenantId, async (tx) => ({
+      items: await tx.query<{ id: string; name: string }>(
+        `SELECT p.id, p.name FROM outbound_processes p
+          WHERE p.tenant_id = :tenantId AND p.deleted_at IS NULL AND p.status = 'active'
+            AND EXISTS (SELECT 1 FROM caller_assignments ca WHERE ca.tenant_id = :tenantId AND ca.process_id = p.id AND ca.status = 'active')
+          ORDER BY p.name LIMIT 200`),
+    }));
+  }
+
   // ------------------------------------------------------------------ route preview (no reservation, no call)
   async previewRoute(actor: AuthUser, input: PlaceCallInput) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
