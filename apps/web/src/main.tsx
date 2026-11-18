@@ -11,6 +11,7 @@ import { UsersPage } from './pages/UsersPage';
 import { RolesPage } from './pages/RolesPage';
 import { TeamsPage } from './pages/TeamsPage';
 import { PlatformTenantsPage } from './pages/PlatformTenantsPage';
+import { PlatformOverviewPage } from './pages/PlatformOverviewPage';
 import { ProvidersPage } from './pages/ProvidersPage';
 import { DidsPage } from './pages/DidsPage';
 import { ProcessesPage } from './pages/ProcessesPage';
@@ -30,7 +31,7 @@ function RequireAuth({ children, perm }: { children: ReactNode; perm?: string })
 /** Layout route for every tenant screen: a platform super admin has no tenant, so they are sent to the platform console. */
 function TenantOnly() {
   const { me } = useAuth();
-  return me?.isPlatformAdmin ? <Navigate to="/platform/tenants" replace /> : <Outlet />;
+  return me?.isPlatformAdmin ? <Navigate to="/platform" replace /> : <Outlet />;
 }
 
 function RequirePlatform({ children }: { children: ReactNode }) {
@@ -46,6 +47,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route element={<RequireAuth><Shell /></RequireAuth>}>
+            <Route path="platform" element={<RequirePlatform><PlatformOverviewPage /></RequirePlatform>} />
             <Route path="platform/tenants" element={<RequirePlatform><PlatformTenantsPage /></RequirePlatform>} />
             <Route element={<TenantOnly />}>
             <Route index element={<DashboardPage />} />

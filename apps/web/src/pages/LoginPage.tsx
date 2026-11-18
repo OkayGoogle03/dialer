@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, ApiError, Branding } from '../api/client';
+import { SLUG_RE } from '@dialer/validation';
 import { applyBranding, useAuth } from '../auth/AuthContext';
 
 const TENANT_KEY = 'dialer.lastTenant';
@@ -34,6 +35,10 @@ export function LoginPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!SLUG_RE.test(tenant)) {
+      setError('Company ID is the short ID of your company, not its display name: lowercase letters, digits and hyphens, no spaces (for example "demo"). Platform administrators use "platform".');
+      return;
+    }
     setBusy(true);
     try {
       await login(tenant, email, password);
@@ -55,7 +60,7 @@ export function LoginPage() {
         <div className="field">
           <label htmlFor="tenant">Company ID</label>
           <input id="tenant" value={tenant} onChange={(e) => setTenant(e.target.value.trim().toLowerCase())} autoComplete="organization" required />
-          {branding && <span className="hint">{branding.tenantName}</span>}
+          {branding ? <span className="hint">{branding.tenantName}</span> : <span className="hint">Short ID, no spaces. Platform administrators: platform</span>}
         </div>
         <div className="field">
           <label htmlFor="email">Email</label>

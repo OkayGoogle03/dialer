@@ -58,3 +58,15 @@ Notes:
 | AI agent configuration, AI testing, knowledge bases | Admin, Supervisor | 5-6 |
 | Self-service password reset | everyone | 7 |
 | Auditor and Billing Admin have no working screens beyond the dashboard today | Auditor, Billing Admin | – |
+
+## Home screen per role (what each account sees after sign-in)
+| Account type | Lands on | Sidebar |
+|---|---|---|
+| Platform super admin | Platform overview (client companies, active/suspended, users, plans, newest companies) | Overview, Tenants only |
+| Tenant Admin | Calling-setup checklist, latest calls, last 24 h, people | all tenant screens |
+| Supervisor / Team Leader | Setup status (read-only, "Ask an administrator"), latest calls, last 24 h, people | Dashboard, Users, Dialer, Caller Excel Import (supervisor), Processes, SIP Providers, DIDs, Call Servers, Teams |
+| Agent | My recent calls + Open dialer | Dashboard, Dialer |
+| Auditor | Last 24 h, people | Dashboard, Users, Teams |
+| Billing Admin | Explains that billing screens are not available yet | Dashboard |
+
+Sign-in uses the company ID: the platform super admin signs in with the platform company ID (`platform`), every other account with its own company ID (for example `demo`, `dgtd`). A tenant user who opens a platform address is refused (UI and API); a super admin who opens a tenant address is redirected to the overview.

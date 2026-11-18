@@ -16,7 +16,7 @@ const NAV: { to: string; label: string; perm?: string }[] = [
   { to: '/settings/branding', label: 'Branding', perm: 'branding:manage' },
 ];
 
-const PLATFORM_NAV = [{ to: '/platform/tenants', label: 'Tenants' }];
+const PLATFORM_NAV = [{ to: '/platform', label: 'Overview', end: true }, { to: '/platform/tenants', label: 'Tenants', end: false }];
 
 export function Shell() {
   const { me, logout, can } = useAuth();
@@ -26,7 +26,7 @@ export function Shell() {
       <nav className="sidebar" aria-label="Main">
         <div className="brand">{platform ? 'Platform Console' : me?.branding?.productName ?? 'Project Dialer'}</div>
         {platform
-          ? PLATFORM_NAV.map((n) => <NavLink key={n.to} to={n.to}>{n.label}</NavLink>)
+          ? PLATFORM_NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.end}>{n.label}</NavLink>)
           : NAV.filter((n) => !n.perm || can(n.perm)).map((n) => <NavLink key={n.to} to={n.to} end={n.to === '/'}>{n.label}</NavLink>)}
         <div className="spacer" />
         <button className="btn secondary" style={{ color: '#fff' }} onClick={logout}>Sign out</button>
