@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const dgram = require('node:dgram');
 const net = require('node:net');
 const crypto = require('node:crypto');
-const { SipUa, parse, linearToUlaw, ulawToLinear, linearToAlaw, alawToLinear } = require('./sip-ua');
+const { isValidTarget, SipUa, parse, linearToUlaw, ulawToLinear, linearToAlaw, alawToLinear } = require('./sip-ua');
 
 const md5 = (s) => crypto.createHash('md5').update(s).digest('hex');
 const CRLF = '\r\n';
@@ -143,4 +143,9 @@ test('cancelling before answer sends CANCEL', async () => {
 test('parser handles compact headers and bodies', () => {
   const m = parse(['SIP/2.0 200 OK', 'v: SIP/2.0/UDP 1.2.3.4:5060;branch=z9hG4bKx', 'i: abc@host', 'CSeq: 1 INVITE', 'l: 3', '', 'abc'].join(CRLF));
   assert.equal(m.status, 200); assert.equal(m.headers['call-id'][0], 'abc@host'); assert.equal(m.body, 'abc');
+});
+
+test('call targets from the server are accepted; injection attempts are not', () => {
+  for (const ok of ['sip:918976585497@10.0.0.5', 'sip:919876543210@pbx.example.com', 'sip:5551234@pbx.local:5060', 'sip:1001@[2001:db8::1]:5060']) assert.equal(isValidTarget(ok), true, ok);
+  for (const bad of ['tel:123', 'sip:123@host;transport=udp', 'sip:123@host\r\nVia: x', 'sip:@host', 'http://x', 'sip:12 3@host']) assert.equal(isValidTarget(bad), false, bad);
 });

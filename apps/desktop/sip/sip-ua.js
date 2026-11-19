@@ -341,4 +341,7 @@ class SipUa extends EventEmitter {
   }
 }
 
-module.exports = { SipUa, parse, digestHeader, parseSdp, linearToUlaw, ulawToLinear, linearToAlaw, alawToLinear };
+/** Only plain sip: URIs (user@host[:port]) may be dialled from the page. */
+const isValidTarget = (t) => /^sip:[A-Za-z0-9._+*#-]+@[A-Za-z0-9.-]+(:\d{1,5})?$/.test(String(t)) || /^sip:[A-Za-z0-9._+*#-]+@\[[0-9A-Fa-f:]+\](:\d{1,5})?$/.test(String(t));
+
+module.exports = { isValidTarget, SipUa, parse, digestHeader, parseSdp, linearToUlaw, ulawToLinear, linearToAlaw, alawToLinear };

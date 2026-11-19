@@ -4,7 +4,7 @@
 const { app, BrowserWindow, Menu, shell, session, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const { SipUa } = require('./sip/sip-ua');
+const { SipUa, isValidTarget } = require('./sip/sip-ua');
 
 const cfgFile = () => path.join(app.getPath('userData'), 'config.json');
 const readCfg = () => { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); } catch { return {}; } };
@@ -89,7 +89,7 @@ function registerSip() {
   ipcMain.handle('sip:stop', guard(() => { if (sip) { sip.stop(); sip = null; } }));
   ipcMain.handle('sip:call', guard(async (target) => {
     if (!sip) return { ok: false, message: 'Not started' };
-    if (!/^sip:[A-Za-z0-9._+*#-]+@[A-Za-z0-9.:[]-]+$/.test(String(target))) return { ok: false, message: 'Invalid target' };
+    if (!isValidTarget(target)) return { ok: false, message: 'Invalid target' };
     try { await sip.callTo(String(target)); return { ok: true }; } catch (e) { return { ok: false, message: String(e.message || e) }; }
   }));
   ipcMain.handle('sip:hangup', guard(() => sip && sip.hangup()));
