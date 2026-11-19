@@ -35,6 +35,13 @@ describe('call outcome: Success when the phone was reached, Not success when it 
     expect(failed(null, 'something odd')).toEqual({ status: 'not_success', note: 'Not connected: something odd' });
   });
 
+  it('a timeout or unavailable answer AFTER the phone rang is a normal no-answer (Success)', () => {
+    expect(failed(408, 'Request Timeout', true)).toMatchObject({ status: 'success', note: expect.stringMatching(/rang but the user did not answer.*408/) });
+    expect(failed(480, 'Temporarily Unavailable', true).status).toBe('success');
+    expect(failed(408, 'Request Timeout', false).status).toBe('not_success');
+    expect(failed(480, 'Temporarily Unavailable', false).status).toBe('not_success');
+  });
+
   it('cancelling before the phone rang is Not success', () => {
     expect(classifyOutcome({ final: 'completed', answered: false, rang: false, cause: 'Agent ended the call' })).toEqual({ status: 'not_success', note: 'Call cancelled before the phone started ringing' });
     expect(failed(487, 'Request Terminated', false).status).toBe('not_success');

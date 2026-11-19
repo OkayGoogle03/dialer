@@ -41,6 +41,8 @@ export function classifyOutcome(i: OutcomeInput): Outcome {
   }
 
   // failed
+  // These codes after the phone had already been ringing are the PBX's own "nobody answered" timeout, not a server fault.
+  if (i.rang && (code === 408 || code === 480 || code === 487 || /timeout|timed out|unavailable/.test(c) && !code)) return ok(withCode('Phone rang but the user did not answer', code, cause));
   switch (code) {
     case 486: case 600: return ok(withCode('Phone rang/connected: the user is busy or on another call', code, cause));
     case 603: return ok(withCode('Phone rang: the user declined / disconnected the call', code, cause));
