@@ -20,12 +20,15 @@ import { SoftphoneService } from '../softphone/softphone';
 export const LIST_HEADERS = ['Call Server IP', 'SIP ID', 'SIP ID Password', 'Prefix', 'Phone Number'] as const;
 /** Optional sixth column (older five-column files are still accepted). */
 export const PROCESS_HEADER = 'Process Name';
+/** Optional seventh column. */
+export const PROVIDER_HEADER = 'Service Provider';
 const MAX_ROWS = 2000;
 const SIP_ID_RE = /^[A-Za-z0-9._@+-]{1,64}$/;
 const PREFIX_RE = /^[0-9]{0,6}$/;
 const PHONE_RE = /^\+?[0-9]{3,20}$/;
 
 const itemsQuery = z.object({ limit: z.coerce.number().int().min(1).max(500).default(200), offset: z.coerce.number().int().min(0).default(0), status: z.string().max(16).optional() }).strict();
+const dashQuery = z.object({ days: z.coerce.number().int().min(1).max(90).default(14) }).strict();
 const listQuery = z.object({ userId: uuidSchema.optional() }).strict();
 
 /** Cells that Excel would read as a formula are neutralised in the export. */
@@ -34,16 +37,16 @@ const safe = (v: string | null) => (v && /^[=@+-]/.test(v) && !/^\+?[0-9]+$/.tes
 /** Standard port per transport: SIP 5060 (udp/tcp), WebSocket 8089 (wss) / 8088 (ws). */
 const defaultPort = (t: string) => (t === 'udp' || t === 'tcp' ? 5060 : t === 'ws' ? 8088 : 8089);
 
-interface Parsed { processName: string; row: number; host: string; sipId: string; password: string; prefix: string; phone: string; error?: string }
+interface Parsed { processName: string; serviceProvider: string; row: number; host: string; sipId: string; password: string; prefix: string; phone: string; error?: string }
 
 export async function buildListTemplate(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Calls');
-  ws.addRow([...LIST_HEADERS, PROCESS_HEADER]);
+  ws.addRow([...LIST_HEADERS, PROCESS_HEADER, PROVIDER_HEADER]);
   ws.getRow(1).font = { bold: true };
-  ws.columns = [{ width: 22 }, { width: 14 }, { width: 22 }, { width: 10 }, { width: 18 }, { width: 24 }];
+  ws.columns = [{ width: 22 }, { width: 14 }, { width: 22 }, { width: 10 }, { width: 18 }, { width: 24 }, { width: 24 }];
   ws.views = [{ state: 'frozen', ySplit: 1 }];
-  for (const c of [1, 2, 3, 4, 5, 6]) ws.getColumn(c).numFmt = '@';
+  for (const c of [1, 2, 3, 4, 5, 6, 7]) ws.getColumn(c).numFmt = '@';
   const info = wb.addWorksheet('Instructions');
   [
     'One row per call. Keep the five headers exactly as they are.',
@@ -52,7 +55,8 @@ export async function buildListTemplate(): Promise<Buffer> {
     'Prefix: digits added in front of the phone number (0-6 digits, may be empty). +international numbers are dialled as they are.',
     'Phone Number: digits, optionally starting with +.',
     'Process Name (optional): the outbound process / campaign this call belongs to (up to 100 characters). Shown on every row and in the exported results.',
-    'Example row: 10.0.0.5 | 1001 | secret123 | 91 | 9876543210 | Sales Outbound',
+    'Service Provider (optional): the carrier / service provider name for this call (up to 100 characters). Shown on every row and in the exported results.',
+    'Example row: 10.0.0.5 | 1001 | secret123 | 91 | 9876543210 | Sales Outbound | Airtel',
   ].forEach((t) => info.addRow([t]));
   info.getColumn(1).width = 120;
   return Buffer.from(await wb.xlsx.writeBuffer());
@@ -66,14 +70,15 @@ async function parseList(buf: Buffer): Promise<Parsed[]> {
   if (!ws) throw new ImportFileError('EMPTY_FILE', 'The workbook has no worksheets.');
   const bad = LIST_HEADERS.filter((h, i) => cellText(ws.getRow(1).getCell(i + 1).value).text !== h);
   const sixth = cellText(ws.getRow(1).getCell(6).value).text;
-  if (bad.length || (sixth !== '' && sixth !== PROCESS_HEADER)) throw new ImportFileError('INVALID_HEADERS', `Invalid headers. The first row must be exactly: ${[...LIST_HEADERS, PROCESS_HEADER].join(' | ')} (Process Name is optional).`);
+  const seventh = cellText(ws.getRow(1).getCell(7).value).text;
+  if (bad.length || (sixth !== '' && sixth !== PROCESS_HEADER) || (seventh !== '' && seventh !== PROVIDER_HEADER)) throw new ImportFileError('INVALID_HEADERS', `Invalid headers. The first row must be exactly: ${[...LIST_HEADERS, PROCESS_HEADER, PROVIDER_HEADER].join(' | ')} (Process Name and Service Provider are optional).`);
   const out: Parsed[] = [];
   for (let r = 2; r <= Math.min(ws.rowCount, 100_000); r++) {
-    const cells = [1, 2, 3, 4, 5, 6].map((c) => cellText(ws.getRow(r).getCell(c).value));
+    const cells = [1, 2, 3, 4, 5, 6, 7].map((c) => cellText(ws.getRow(r).getCell(c).value));
     if (cells.every((c) => c.text === '' && !c.error)) continue;
     if (out.length >= MAX_ROWS) throw new ImportFileError('TOO_MANY_ROWS', `More than ${MAX_ROWS} rows. Split the file.`);
-    const [host, sipId, password, prefix, phone, processName] = cells.map((c) => c.text);
-    const item: Parsed = { row: r, host, sipId, password, prefix, phone: phone.replace(/[\s().-]/g, ''), processName: processName.slice(0, 200) };
+    const [host, sipId, password, prefix, phone, processName, serviceProvider] = cells.map((c) => c.text);
+    const item: Parsed = { row: r, host, sipId, password, prefix, phone: phone.replace(/[\s().-]/g, ''), processName: processName.slice(0, 200), serviceProvider: serviceProvider.slice(0, 200) };
     const cellErr = cells.find((c) => c.error)?.error;
     if (cellErr) item.error = cellErr;
     else if (!HOST_RE.test(host)) item.error = 'Call Server IP is missing or invalid';
@@ -82,6 +87,7 @@ async function parseList(buf: Buffer): Promise<Parsed[]> {
     else if (!PREFIX_RE.test(prefix)) item.error = 'Prefix must be 0-6 digits';
     else if (!PHONE_RE.test(item.phone)) item.error = 'Phone Number must be 3-20 digits, optionally starting with +';
     else if (processName.length > 100) item.error = 'Process Name is longer than 100 characters';
+    else if (serviceProvider.length > 100) item.error = 'Service Provider is longer than 100 characters';
     out.push(item);
   }
   if (!out.length) throw new ImportFileError('EMPTY_FILE', 'The file has no data rows.');
@@ -141,10 +147,10 @@ export class CallListsService {
         const p: Record<string, unknown> = { lid: listId };
         const values = chunk.map((r, j) => {
           const srv = servers.get(r.host.toLowerCase());
-          Object.assign(p, { [`i${j}`]: newId(), [`n${j}`]: r.row, [`s${j}`]: srv?.id ?? null, [`h${j}`]: r.host.slice(0, 253), [`d${j}`]: r.sipId.slice(0, 64), [`x${j}`]: r.prefix, [`p${j}`]: r.phone.slice(0, 40), [`pn${j}`]: r.processName || null, [`st${j}`]: r.error ? 'invalid' : 'pending', [`r${j}`]: r.error ?? null });
-          return `(:i${j}, :tenantId, :lid, :n${j}, :s${j}, :h${j}, :d${j}, :x${j}, :p${j}, :pn${j}, :st${j}, :r${j})`;
+          Object.assign(p, { [`i${j}`]: newId(), [`n${j}`]: r.row, [`s${j}`]: srv?.id ?? null, [`h${j}`]: r.host.slice(0, 253), [`d${j}`]: r.sipId.slice(0, 64), [`x${j}`]: r.prefix, [`p${j}`]: r.phone.slice(0, 40), [`pn${j}`]: r.processName || null, [`sv${j}`]: r.serviceProvider || null, [`st${j}`]: r.error ? 'invalid' : 'pending', [`r${j}`]: r.error ?? null });
+          return `(:i${j}, :tenantId, :lid, :n${j}, :s${j}, :h${j}, :d${j}, :x${j}, :p${j}, :pn${j}, :sv${j}, :st${j}, :r${j})`;
         });
-        await tx.execute(`INSERT INTO call_list_items (id, tenant_id, list_id, row_no, call_server_id, server_host, sip_id, prefix, phone, process_name, status, result) VALUES ${values.join(', ')}`, p);
+        await tx.execute(`INSERT INTO call_list_items (id, tenant_id, list_id, row_no, call_server_id, server_host, sip_id, prefix, phone, process_name, service_provider, status, result) VALUES ${values.join(', ')}`, p);
       }
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_list.imported', entityType: 'call_list', entityId: listId, metadata: { rows: rows.length, invalid, createdServers, agent: target } }, ctx);
       return {
@@ -187,6 +193,39 @@ export class CallListsService {
         : [];
       return { items: lists.map((l) => ({ id: l.id, processNames: procs.filter((x) => x.list_id === l.id).map((x) => x.process_name).sort(), name: l.name, fileName: l.file_name, agentId: l.user_id, agentName: l.agent_name, total: l.total_rows, invalid: l.invalid_rows, createdAt: iso(l.created_at),
         counts: Object.fromEntries(counts.filter((c) => c.list_id === l.id).map((c) => [c.status, Number(c.n)])) })) };
+    });
+  }
+
+  /** Aggregates for the dashboard: result totals, calls per day, by process / service provider and the latest results. Admins see every list, agents their own. */
+  dashboard(actor: AuthUser, days: number) {
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      const mine = !this.isAdmin(actor);
+      const sc = mine ? ' AND l.user_id = :me' : '';
+      const p: Record<string, unknown> = mine ? { me: actor.userId } : {};
+      const from = `FROM call_list_items i JOIN call_lists l ON l.id = i.list_id AND l.tenant_id = :tenantId WHERE i.tenant_id = :tenantId${sc}`;
+      const status = await tx.query<{ status: string; n: number }>(`SELECT i.status, COUNT(*) AS n ${from} GROUP BY i.status`, p);
+      const daily = await tx.query<{ d: string; status: string; n: number }>(
+        `SELECT DATE_FORMAT(i.called_at, '%Y-%m-%d') AS d, i.status, COUNT(*) AS n ${from} AND i.called_at >= UTC_TIMESTAMP() - INTERVAL ${days} DAY AND i.status IN ('success', 'not_success') GROUP BY d, i.status ORDER BY d`, p);
+      const by = async (col: 'process_name' | 'service_provider') => (await tx.query<{ k: string; status: string; n: number }>(
+        `SELECT COALESCE(i.${col}, 'Not set') AS k, i.status, COUNT(*) AS n ${from} AND i.status IN ('success', 'not_success') GROUP BY k, i.status`, p));
+      const fold = (rows: { k: string; status: string; n: number }[]) => {
+        const m = new Map<string, { name: string; success: number; notSuccess: number }>();
+        for (const r of rows) { const e = m.get(r.k) ?? { name: r.k, success: 0, notSuccess: 0 }; if (r.status === 'success') e.success += Number(r.n); else e.notSuccess += Number(r.n); m.set(r.k, e); }
+        return [...m.values()].sort((a, b) => b.success + b.notSuccess - (a.success + a.notSuccess)).slice(0, 8);
+      };
+      const [dur] = await tx.query<{ answered: number; avg_s: number | null }>(`SELECT COUNT(i.answered_at) AS answered, AVG(i.duration_seconds) AS avg_s ${from}`, p);
+      const recent = await tx.query(
+        `SELECT i.id, i.phone, i.process_name, i.service_provider, i.status, i.result, i.called_at, l.name AS list_name ${from} AND i.called_at IS NOT NULL ORDER BY i.called_at DESC LIMIT 8`, p);
+      return {
+        days,
+        counts: Object.fromEntries(status.map((r) => [r.status, Number(r.n)])),
+        daily: daily.map((r) => ({ date: r.d, status: r.status, n: Number(r.n) })),
+        byProcess: fold(await by('process_name')),
+        byProvider: fold(await by('service_provider')),
+        answered: Number(dur?.answered ?? 0),
+        avgTalkSeconds: dur?.avg_s == null ? null : Math.round(Number(dur.avg_s)),
+        recent: recent.map((r) => ({ id: r.id, phone: r.phone, processName: r.process_name, serviceProvider: r.service_provider, status: r.status, result: r.result, calledAt: iso(r.called_at), listName: r.list_name })),
+      };
     });
   }
 
@@ -241,16 +280,16 @@ export class CallListsService {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Call results');
     // same columns and order as the upload sheet (without the password), then the two result columns Status and Note
-    const headers = ['Row', 'Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Process Name', 'Status', 'Note', 'Dialed Number', 'SIP Code', 'Attempts', 'Called At (UTC)', 'Answered At (UTC)', 'Ended At (UTC)', 'Duration (s)'];
+    const headers = ['Row', 'Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Process Name', 'Service Provider', 'Status', 'Note', 'Dialed Number', 'SIP Code', 'Attempts', 'Called At (UTC)', 'Answered At (UTC)', 'Ended At (UTC)', 'Duration (s)'];
     ws.addRow(headers);
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
     ws.columns = headers.map((h) => ({ width: Math.max(12, h.length + 2) }));
     for (const r of rows) {
-      ws.addRow([r.row_no, safe(r.server_host), safe(r.sip_id), safe(r.prefix), safe(r.phone), safe(r.process_name), `${STATUS_LABEL[r.status] ?? r.status}${r.sip_code ? ` (${r.sip_code})` : ''}`, safe(r.result), safe(r.dialed), r.sip_code ?? '', r.attempts,
+      ws.addRow([r.row_no, safe(r.server_host), safe(r.sip_id), safe(r.prefix), safe(r.phone), safe(r.process_name), safe(r.service_provider), `${STATUS_LABEL[r.status] ?? r.status}${r.sip_code ? ` (${r.sip_code})` : ''}`, safe(r.result), safe(r.dialed), r.sip_code ?? '', r.attempts,
         r.called_at ? new Date(r.called_at).toISOString() : '', r.answered_at ? new Date(r.answered_at).toISOString() : '', r.ended_at ? new Date(r.ended_at).toISOString() : '', r.duration_seconds ?? '']);
     }
-    for (const c of [2, 3, 4, 5, 6, 9]) ws.getColumn(c).numFmt = '@';
+    for (const c of [2, 3, 4, 5, 6, 7, 10]) ws.getColumn(c).numFmt = '@';
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename: `${list.name.replace(/[^A-Za-z0-9._-]+/g, '_')}_results.xlsx` };
   }
 
@@ -265,7 +304,7 @@ const STATUS_LABEL: Record<string, string> = { success: 'Success', not_success: 
 
 
 const itemView = (r: Row) => ({
-  id: r.id, row: r.row_no, processName: r.process_name, serverHost: r.server_host, sipId: r.sip_id, prefix: r.prefix, phone: r.phone, dialed: r.dialed, status: r.status, result: r.result, sipCode: r.sip_code,
+  id: r.id, row: r.row_no, processName: r.process_name, serviceProvider: r.service_provider, serverHost: r.server_host, sipId: r.sip_id, prefix: r.prefix, phone: r.phone, dialed: r.dialed, status: r.status, result: r.result, sipCode: r.sip_code,
   attempts: r.attempts, calledAt: iso(r.called_at), answeredAt: iso(r.answered_at), endedAt: iso(r.ended_at), durationSeconds: r.duration_seconds,
 });
 
@@ -289,6 +328,9 @@ export class CallListsController {
     if (userId !== undefined && !uuidSchema.safeParse(userId).success) throw new BadRequestException('userId must be a UUID');
     return this.svc.import(u, file, userId, name, ctx);
   }
+
+  @Get('dashboard')
+  dashboard(@CurrentUser() u: AuthUser, @Query(new ZodPipe(dashQuery)) q: z.infer<typeof dashQuery>) { return this.svc.dashboard(u, q.days); }
 
   @Get()
   list(@CurrentUser() u: AuthUser, @Query(new ZodPipe(listQuery)) q: z.infer<typeof listQuery>) { return this.svc.list(u, q); }

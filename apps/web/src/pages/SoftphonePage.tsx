@@ -4,7 +4,7 @@ import { Alert, Badge, Button, Card, DataTable, PageHeader, SelectField, TextFie
 import { api } from '../api/client';
 import { Notice } from '../components/kit';
 import type { CallListItem, CallListSummary } from '../api/types';
-import { CallListRows, Counts, exportList, useListItems } from '../components/CallListRows';
+import { CallListRows, ResultDonut, exportList, useListItems } from '../components/CallListRows';
 import { useSoftphone } from '../softphone/useSoftphone';
 
 interface LogCall { processName?: string | null; id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null }
@@ -134,6 +134,8 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
   const [listId, setListId] = useState<string | null>(null);
   const [auto, setAuto] = useState(false);
   const [kick, setKick] = useState(0);
+  // ids still to redial after a Redial click while Auto-dial next is ticked (that row first, then every row after it down to the last)
+  const [queue, setQueue] = useState<string[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const { data, error } = useListItems(listId, kick);
 
@@ -160,12 +162,28 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
   const dial = async (i: CallListItem) => { if (listId) { setMsg(null); await sp.dialItem(listId, i); setKick((k) => k + 1); } };
   // auto-dial: when a call ends and the agent enabled it, start the next pending number after a short pause
   useEffect(() => {
-    if (!auto || !idle || !next || sp.reg === 'idle' || sp.reg === 'connecting') return;
+    if (!auto || !idle || !next || queue.length > 0 || sp.reg === 'idle' || sp.reg === 'connecting') return;
     const t = setTimeout(() => void dial(next), 1500);
     return () => clearTimeout(t);
-  }, [auto, idle, next?.id, sp.reg]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [auto, idle, next?.id, sp.reg, queue.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // redial run: unticking Auto-dial next stops it (the row that was clicked still gets its redial)
+  useEffect(() => { if (!auto) setQueue([]); }, [auto]);
+  useEffect(() => {
+    if (!auto || !idle || !queue.length || sp.reg === 'idle' || sp.reg === 'connecting') return;
+    const t = setTimeout(() => {
+      const item = data?.items.find((x) => x.id === queue[0]);
+      setQueue((q) => q.slice(1));
+      if (item) void dial(item);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [auto, idle, queue, sp.reg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!lists.length) return null;
+  /** Redial a row. With Auto-dial next ticked every later row is redialled after it, one after another; unticked it is just this row. */
+  const startRedial = (i: CallListItem) => {
+    setQueue(auto ? (data?.items ?? []).filter((x) => x.row > i.row && redial(x)).map((x) => x.id) : []);
+    void dial(i);
+  };
   const redial = (i: CallListItem) => ['pending', 'success', 'not_success', 'failed', 'not_answered', 'completed'].includes(i.status);
   return (
     <Card title="My call list" className="stack">
@@ -175,10 +193,10 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
         <label><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto-dial next</label>
         <Button variant="secondary" size="small" onClick={() => listId && exportList(listId, setMsg)}>Export Excel</Button>
       </div>
-      {data && <Counts counts={data.counts} />}
+      {data && <ResultDonut counts={data.counts} />}
       {msg && <Alert>{msg}</Alert>}
       <CallListRows items={data?.items ?? null} error={error}
-        action={(i) => redial(i) ? <Button size="small" variant="secondary" disabled={!idle || sp.reg === 'idle'} onClick={() => void dial(i)}>{i.status === 'pending' ? 'Call' : 'Redial'}</Button> : null} />
+        action={(i) => redial(i) ? <Button size="small" variant="secondary" disabled={!idle || sp.reg === 'idle'} onClick={() => startRedial(i)}>{i.status === 'pending' ? 'Call' : 'Redial'}</Button> : null} />
     </Card>
   );
 }

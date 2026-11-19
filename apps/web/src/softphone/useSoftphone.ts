@@ -80,10 +80,9 @@ export function useSoftphone() {
     const clearRing = () => { if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; } };
     const timeoutCause = () => (sawRinging ? `No answer within ${ringMs / 1000} s (ring limit)` : `No ringing within ${ringMs / 1000} s (the call server only sent progress / early media)`);
     let sawRinging = false;
-    s.on('progress', (e: any) => {
-      const code = (e?.response?.status_code as number | undefined) ?? 180;
-      // Only a 180 Ringing proves the called phone is ringing; 183 Session Progress (early media) may be an announcement or ringback from the carrier.
-      if (code !== 183 && !sawRinging) { sawRinging = true; track(base.callId, 'ringing'); }
+    s.on('progress', () => {
+      // 180 Ringing and 183 Session Progress (ringback / early media) both mean the call server is ringing the user's phone.
+      if (!sawRinging) { sawRinging = true; track(base.callId, 'ringing'); }
       setCall((c) => ({ ...c, state: 'ringing' }));
       if (base.direction === 'out' && !ringTimer && !timedOut) ringTimer = setTimeout(() => { timedOut = true; try { s.terminate(); } catch { /* already ended */ } }, ringMs);
     });

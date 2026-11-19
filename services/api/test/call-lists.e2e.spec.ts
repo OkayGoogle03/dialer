@@ -41,7 +41,7 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     const tpl = await t.http.get('/api/v1/call-lists/template').set(bearer(a)).buffer(true).parse((res, cb) => { const c: Buffer[] = []; res.on('data', (d: Buffer) => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); }).expect(200);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(tpl.body as ExcelJS.Buffer);
-    expect((wb.worksheets[0].getRow(1).values as string[]).slice(1)).toEqual([...LIST_HEADERS, 'Process Name']);
+    expect((wb.worksheets[0].getRow(1).values as string[]).slice(1)).toEqual([...LIST_HEADERS, 'Process Name', 'Service Provider']);
     const wrong = await makeWorkbook([['1', '2', '3', '4', '5']], ['Server', 'SIP', 'Pass', 'Prefix', 'Phone']);
     expect((await upload(a, wrong).expect(400)).body.error.message).toMatch(/headers/i);
     await upload(a, Buffer.from('not an excel file')).expect(400);
@@ -54,14 +54,14 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
 
   it('only managers import; the import creates the call server and the agent\'s SIP account and keeps bad rows with reasons', async () => {
     const rows = [
-      ['10.20.30.40', '2001', 'excel-sip-secret-1', '91', '9876543210', 'Sales Outbound'],
+      ['10.20.30.40', '2001', 'excel-sip-secret-1', '91', '9876543210', 'Sales Outbound', 'Airtel'],
       ['10.20.30.40', '2001', 'excel-sip-secret-1', '91', '+14155550100'],
       ['10.20.30.40', '2002', 'other-secret', '91', '9876543211'], // second SIP ID for the same agent+server
       ['10.20.30.40', '2001', 'excel-sip-secret-1', '91', 'abc'],  // bad phone
       ['not a host!', '2001', 'x', '91', '9876543212'],            // bad IP
     ];
-    await upload(ag1, await makeWorkbook(rows, [...LIST_HEADERS, 'Process Name']), `?userId=${ag1Id}`).expect(403);
-    const res = (await upload(a, await makeWorkbook(rows, [...LIST_HEADERS, 'Process Name']), `?userId=${ag1Id}&name=Morning%20batch`).expect(201)).body;
+    await upload(ag1, await makeWorkbook(rows, [...LIST_HEADERS, 'Process Name', 'Service Provider']), `?userId=${ag1Id}`).expect(403);
+    const res = (await upload(a, await makeWorkbook(rows, [...LIST_HEADERS, 'Process Name', 'Service Provider']), `?userId=${ag1Id}&name=Morning%20batch`).expect(201)).body;
     expect(res).toMatchObject({ total: 5, valid: 2, invalid: 3, createdServers: 1 });
     expect(res.errors.map((e: { message: string }) => e.message).join('|')).toMatch(/already uses SIP ID 2001/);
     listId = res.id;
@@ -93,7 +93,7 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     await t.http.get(`/api/v1/call-lists/${listId}/export`).set(bearer(b)).expect(404);
     const body = await getItems(ag1);
     items = body.items;
-    expect(items.find((i: { phone: string }) => i.phone === '9876543210')).toMatchObject({ processName: 'Sales Outbound' });
+    expect(items.find((i: { phone: string }) => i.phone === '9876543210')).toMatchObject({ processName: 'Sales Outbound', serviceProvider: 'Airtel' });
     expect(items.find((i: { phone: string }) => i.phone === '+14155550100')?.processName ?? null).toBeNull();
     expect(body.counts).toEqual({ pending: 2, invalid: 3 });
   });
@@ -150,6 +150,21 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     expect(text).toContain('Sales Outbound');
     expect(text).toContain('Invalid row');
     expect(text).toContain('Phone Number must be');
+  });
+
+  it('dashboard aggregates results per day, process and provider, scoped to the caller', async () => {
+    const mineRes = (await t.http.get('/api/v1/call-lists/dashboard').set(bearer(ag1)).expect(200)).body;
+    expect(mineRes.counts).toMatchObject({ success: 1, not_success: 1, invalid: 3 });
+    expect(mineRes.daily.reduce((n: number, d: { n: number }) => n + d.n, 0)).toBe(2);
+    expect(mineRes.byProcess.find((x: { name: string }) => x.name === 'Sales Outbound')).toMatchObject({ success: 1, notSuccess: 0 });
+    expect(mineRes.answered).toBe(1);
+    expect(mineRes.recent.length).toBe(2);
+    expect(mineRes.recent[0]).toMatchObject({ listName: 'Morning batch' });
+    const all = (await t.http.get('/api/v1/call-lists/dashboard?days=7').set(bearer(a)).expect(200)).body;
+    expect(all.counts.success).toBe(1);
+    const other = (await t.http.get('/api/v1/call-lists/dashboard').set(bearer(b)).expect(200)).body; // another tenant sees none of it
+    expect(other.counts).toEqual({});
+    await t.http.get('/api/v1/call-lists/dashboard?days=500').set(bearer(a)).expect(400);
   });
 
   it('deleting a list removes its rows', async () => {

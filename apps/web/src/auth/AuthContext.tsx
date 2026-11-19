@@ -11,11 +11,14 @@ interface AuthState {
 
 const Ctx = createContext<AuthState | null>(null);
 
+// Colours a tenant never customised are the old database defaults; those keep the built-in warm theme instead of overriding it.
+const LEGACY_DEFAULT = new Set(['#2563eb', '#0f172a', '#16a34a']);
 export function applyBranding(colors: { primary?: string; secondary?: string; accent?: string }) {
   const root = document.documentElement.style;
-  if (colors.primary) root.setProperty('--brand-primary', colors.primary);
-  if (colors.secondary) root.setProperty('--brand-secondary', colors.secondary);
-  if (colors.accent) root.setProperty('--brand-accent', colors.accent);
+  const set = (name: string, v?: string) => { if (v && !LEGACY_DEFAULT.has(v.toLowerCase())) root.setProperty(name, v); else root.removeProperty(name); };
+  set('--brand-primary', colors.primary);
+  set('--brand-secondary', colors.secondary);
+  set('--brand-accent', colors.accent);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

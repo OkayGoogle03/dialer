@@ -1,5 +1,6 @@
 import { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, useId } from 'react';
 
+export * from './charts';
 /** Reusable, accessible primitives. Styling lives in ./styles.css (design tokens overridable per tenant). */
 
 type Variant = 'primary' | 'secondary' | 'danger';
@@ -97,6 +98,42 @@ export function DataTable<T>({ rows, columns, rowKey, loading, error, empty = 'N
           {rows.map((r) => <tr key={rowKey(r)}>{columns.map((c) => <td key={c.key}>{c.render(r)}</td>)}</tr>)}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** Metric tile: large value, small label, optional trend and gradient highlight. */
+export function StatsCard({ title, value, description, trend, tone, highlight }: { title: string; value: ReactNode; description?: string; trend?: { text: string; direction: 'up' | 'down' }; tone?: 'ok' | 'off'; highlight?: boolean }) {
+  return (
+    <div className={['stat', tone, highlight && 'hot'].filter(Boolean).join(' ')}>
+      <div className="hint">{title}</div>
+      <div className="stat-value">{value}</div>
+      {trend && <div className={`trend ${trend.direction}`}>{trend.direction === 'up' ? '↑' : '↓'} {trend.text}</div>}
+      {description && <div className="hint">{description}</div>}
+    </div>
+  );
+}
+
+/** Dependency-free SVG donut with a legend. Segments with a zero value are skipped. */
+export function DonutChart({ segments, centerLabel, size = 120 }: { segments: { label: string; value: number; color: string }[]; centerLabel?: string; size?: number }) {
+  const total = segments.reduce((n, s) => n + s.value, 0);
+  const r = size / 2 - 12;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+  return (
+    <div className="donut" role="img" aria-label={segments.map((s) => `${s.label}: ${s.value}`).join(', ')}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeOpacity=".1" strokeWidth="14" />
+        {total > 0 && segments.filter((s) => s.value > 0).map((s) => {
+          const len = (s.value / total) * c;
+          const el = <circle key={s.label} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={s.color} strokeWidth="14" strokeLinecap="round" strokeDasharray={`${Math.max(len - 4, 1)} ${c}`} strokeDashoffset={-offset} transform={`rotate(-90 ${size / 2} ${size / 2})`} />;
+          offset += len;
+          return el;
+        })}
+        <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" fontSize={size / 5} fontWeight="700" fill="currentColor">{total}</text>
+        {centerLabel && <text x="50%" y={size / 2 + size / 7} textAnchor="middle" fontSize="10" fill="currentColor" fillOpacity=".6">{centerLabel}</text>}
+      </svg>
+      <div className="legend">{segments.map((s) => <span key={s.label}><i style={{ background: s.color }} />{s.label}: {s.value}</span>)}</div>
     </div>
   );
 }

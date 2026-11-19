@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Alert, Badge, Button, Card, DataTable, EmptyState } from '@dialer/ui';
+import { Alert, Badge, Button, Card, DataTable, EmptyState, StatsCard } from '@dialer/ui';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import type { CallServerView, Paged, SoftphoneCallView } from '../api/types';
 import { errText, statusTone } from '../components/kit';
+import { ResultsOverview } from '../components/ResultsOverview';
 
 const ROLE_LABEL: Record<string, string> = {
   tenant_admin: 'Tenant Admin', supervisor: 'Supervisor', team_leader: 'Team Leader', agent: 'Agent', auditor: 'Auditor', billing_admin: 'Billing Admin',
@@ -23,7 +24,8 @@ export function DashboardPage() {
           <div className="hint">{me.tenant.name} · {me.roles.map((r) => ROLE_LABEL[r] ?? r).join(', ')}</div>
         </div>
       </div>
-      <div className="stack">
+      {(can('calls:make') || can('caller_import:manage')) && <ResultsOverview admin={can('caller_import:manage')} />}
+      <div className="dash">
         {can('master_data:read') && <SetupCard canImport={can('caller_import:manage')} />}
         {can('calls:make') && <MyCallsCard />}
         {can('calls:read_all') && <TodayCard />}
@@ -105,8 +107,8 @@ function TodayCard() {
   return (
     <Card title="Last 24 hours" className="stack">
       <div className="stats">
-        <div className="stat"><div className="stat-value">{stats ? total : '…'}</div><div className="hint">Calls placed</div></div>
-        <div className={`stat${failed ? ' off' : ''}`}><div className="stat-value">{stats ? failed : '…'}</div><div className="hint">Failed or uncertain</div></div>
+        <StatsCard title="Calls placed" value={stats ? total : '…'} highlight />
+        <StatsCard title="Failed or uncertain" value={stats ? failed : '…'} tone={failed ? 'off' : undefined} />
       </div>
       {stats && stats.byProcess.length > 0 && (
         <DataTable rows={stats.byProcess} rowKey={(p) => p.id} columns={[{ key: 'n', header: 'Process', render: (p) => p.name }, { key: 't', header: 'Calls', render: (p) => p.total }]} />

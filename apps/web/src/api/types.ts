@@ -58,7 +58,7 @@ export interface SipAccountView {
 
 export interface CallListSummary { processNames: string[]; id: string; name: string; fileName: string | null; agentId: string; agentName: string; total: number; invalid: number; createdAt: string; counts: Record<string, number> }
 export interface CallListItem {
-  id: string; row: number; processName: string | null; serverHost: string | null; sipId: string | null; prefix: string | null; phone: string | null; dialed: string | null; status: string; result: string | null;
+  id: string; row: number; processName: string | null; serviceProvider: string | null; serverHost: string | null; sipId: string | null; prefix: string | null; phone: string | null; dialed: string | null; status: string; result: string | null;
   sipCode: number | null; attempts: number; calledAt: string | null; answeredAt: string | null; endedAt: string | null; durationSeconds: number | null;
 }
 
@@ -66,4 +66,15 @@ export interface CallListSummary { id: string; name: string; fileName: string | 
 export interface CallListItem {
   id: string; row: number; serverHost: string | null; sipId: string | null; prefix: string | null; phone: string | null; dialed: string | null; status: string; result: string | null;
   sipCode: number | null; attempts: number; calledAt: string | null; answeredAt: string | null; endedAt: string | null; durationSeconds: number | null;
+}
+
+export interface CallDashboard {
+  days: number;
+  counts: Record<string, number>;
+  daily: { date: string; status: string; n: number }[];
+  byProcess: { name: string; success: number; notSuccess: number }[];
+  byProvider: { name: string; success: number; notSuccess: number }[];
+  answered: number;
+  avgTalkSeconds: number | null;
+  recent: { id: string; phone: string | null; processName: string | null; serviceProvider: string | null; status: string; result: string | null; calledAt: string | null; listName: string }[];
 }

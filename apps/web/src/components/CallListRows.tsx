@@ -1,5 +1,5 @@
 import { ReactNode, useCallback, useEffect, useState } from 'react';
-import { Alert, Badge, DataTable } from '@dialer/ui';
+import { Alert, Badge, DataTable, DonutChart } from '@dialer/ui';
 import { api, saveBlob } from '../api/client';
 import type { CallListItem } from '../api/types';
 import { errText } from './kit';
@@ -39,12 +39,19 @@ export function CallListRows({ items, error, action }: { items: CallListItem[] |
           { key: 'pf', header: 'Prefix', render: (i) => i.prefix ?? '' },
           { key: 'ph', header: 'Phone Number', render: (i) => <>{i.phone}{i.dialed && <div className="hint">dialled {i.dialed}</div>}</> },
           { key: 'pn', header: 'Process Name', render: (i) => i.processName ?? '' },
+          { key: 'sv', header: 'Service Provider', render: (i) => i.serviceProvider ?? '' },
           { key: 'st', header: 'Status', render: (i) => <>{statusBadge(i.status)}{i.sipCode ? <span className="hint"> ({i.sipCode})</span> : null}</> },
           { key: 'nt', header: 'Note', render: (i) => <span className="hint">{i.result ?? ''}{i.attempts > 1 ? ` · attempt ${i.attempts}` : ''}</span> },
           ...(action ? [{ key: 'a', header: '', render: action }] : []),
         ]} />
     </>
   );
+}
+
+/** Success / Not success / still to do, as a donut plus the plain text counts. */
+export function ResultDonut({ counts }: { counts: Record<string, number> }) {
+  const todo = (counts.pending ?? 0) + (counts.calling ?? 0) + (counts.ringing ?? 0) + (counts.answered ?? 0);
+  return <DonutChart size={104} centerLabel="rows" segments={[{ label: 'Success', value: counts.success ?? 0, color: 'var(--success)' }, { label: 'Not success', value: counts.not_success ?? 0, color: 'var(--danger)' }, { label: 'To do', value: todo, color: 'var(--brand-primary)' }]} />;
 }
 
 export function Counts({ counts }: { counts: Record<string, number> }) {
