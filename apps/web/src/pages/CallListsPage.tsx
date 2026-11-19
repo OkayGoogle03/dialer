@@ -64,6 +64,7 @@ export function CallListsPage() {
         <DataTable rows={lists} rowKey={(l) => l.id} empty="No call lists yet."
           columns={[
             { key: 'n', header: 'List', render: (l) => <><strong>{l.name}</strong><div className="hint">{new Date(l.createdAt).toLocaleString()}</div></> },
+            { key: 'pn', header: 'Process', render: (l) => (l.processNames.length ? l.processNames.join(', ') : '—') },
             { key: 'a', header: 'Agent', render: (l) => l.agentName },
             { key: 's', header: 'Status', render: (l) => <Counts counts={l.counts} /> },
             { key: 'x', header: '', render: (l) => (

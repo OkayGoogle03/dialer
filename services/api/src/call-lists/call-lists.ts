@@ -182,7 +182,10 @@ export class CallListsService {
       const counts = lists.length
         ? await tx.query<{ list_id: string; status: string; n: number }>(`SELECT list_id, status, COUNT(*) AS n FROM call_list_items WHERE tenant_id = :tenantId AND list_id IN (:ids) GROUP BY list_id, status`, { ids: lists.map((l) => l.id) })
         : [];
-      return { items: lists.map((l) => ({ id: l.id, name: l.name, fileName: l.file_name, agentId: l.user_id, agentName: l.agent_name, total: l.total_rows, invalid: l.invalid_rows, createdAt: iso(l.created_at),
+      const procs = lists.length
+        ? await tx.query<{ list_id: string; process_name: string }>(`SELECT DISTINCT list_id, process_name FROM call_list_items WHERE tenant_id = :tenantId AND list_id IN (:ids) AND process_name IS NOT NULL`, { ids: lists.map((l) => l.id) })
+        : [];
+      return { items: lists.map((l) => ({ id: l.id, processNames: procs.filter((x) => x.list_id === l.id).map((x) => x.process_name).sort(), name: l.name, fileName: l.file_name, agentId: l.user_id, agentName: l.agent_name, total: l.total_rows, invalid: l.invalid_rows, createdAt: iso(l.created_at),
         counts: Object.fromEntries(counts.filter((c) => c.list_id === l.id).map((c) => [c.status, Number(c.n)])) })) };
     });
   }
@@ -213,7 +216,7 @@ export class CallListsService {
            JOIN call_servers s ON s.id = a.call_server_id AND s.tenant_id = :tenantId AND s.deleted_at IS NULL AND s.status = 'active'
           WHERE a.tenant_id = :tenantId AND a.user_id = :me AND a.call_server_id = :sid AND a.deleted_at IS NULL AND a.status = 'active'`, { me: actor.userId, sid: it.call_server_id });
       if (!acct) throw new NotFoundException('No active SIP account / call server for this row');
-      const placed = await this.softphone.placeInTx(tx, actor, acct, it.phone, it.prefix ?? '', { ...DEFAULT_DIAL_PLAN, minLength: 3, stripLeadingZeros: false }, null, ctx, { listItemId: itemId, listId });
+      const placed = await this.softphone.placeInTx(tx, actor, acct, it.phone, it.prefix ?? '', { ...DEFAULT_DIAL_PLAN, minLength: 3, stripLeadingZeros: false }, it.process_name ? { id: null, name: it.process_name } : null, ctx, { listItemId: itemId, listId });
       await tx.execute(
         `UPDATE call_list_items SET status = 'calling', result = NULL, sip_code = NULL, dialed = :d, call_session_id = :cid, attempts = attempts + 1, called_at = UTC_TIMESTAMP(3), answered_at = NULL, ended_at = NULL, duration_seconds = NULL
           WHERE tenant_id = :tenantId AND id = :id`, { id: itemId, d: placed.dialed, cid: placed.callId });

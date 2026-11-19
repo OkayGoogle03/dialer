@@ -7,7 +7,7 @@ import type { CallListItem, CallListSummary } from '../api/types';
 import { CallListRows, Counts, exportList, useListItems } from '../components/CallListRows';
 import { useSoftphone } from '../softphone/useSoftphone';
 
-interface LogCall { id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null }
+interface LogCall { processName?: string | null; id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null }
 
 const PAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 const REG_LABEL: Record<string, string> = { idle: 'Not registered', connecting: 'Registering…', registered: 'Registered', failed: 'Registration failed', unavailable: 'Unavailable' };
@@ -116,7 +116,7 @@ export function SoftphonePage() {
           <DataTable rows={log} rowKey={(c) => c.id} empty="No calls yet."
             columns={[
               { key: 't', header: 'Started', render: (c) => new Date(c.startedAt).toLocaleTimeString() },
-              { key: 'd', header: 'Dialled', render: (c) => <>{c.dialed}{c.prefix && <div className="hint">typed {c.entered} + prefix {c.prefix}</div>}</> },
+              { key: 'd', header: 'Dialled', render: (c) => <>{c.dialed}{c.prefix && <div className="hint">typed {c.entered} + prefix {c.prefix}</div>}{c.processName && <div className="hint">Process: {c.processName}</div>}</> },
               { key: 's', header: 'Status', render: (c) => <><Badge tone={c.status === 'completed' ? 'ok' : c.status === 'failed' ? 'off' : undefined}>{c.status}</Badge>{c.durationSeconds != null && <div className="hint">{c.durationSeconds}s</div>}</> },
             ]} />
           <div style={{ marginTop: 8 }}><Button size="small" variant="secondary" onClick={loadLog}>Refresh</Button></div>

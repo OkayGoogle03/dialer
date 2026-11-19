@@ -188,7 +188,7 @@ export class SoftphoneService {
   }
 
   /** Normalises (prefix etc.), writes the call_sessions row + call.created. Shared by manual dialing and call-list rows. */
-  async placeInTx(tx: SqlRunner, actor: AuthUser, acct: Row, destination: string, prefix: string, plan: typeof DEFAULT_DIAL_PLAN, process: { id: string; name: string } | null, ctx: RequestContext, extraMeta: Record<string, unknown>) {
+  async placeInTx(tx: SqlRunner, actor: AuthUser, acct: Row, destination: string, prefix: string, plan: typeof DEFAULT_DIAL_PLAN, process: { id: string | null; name: string } | null, ctx: RequestContext, extraMeta: Record<string, unknown>) {
     {
       const dto = { destination };
       const n = normalizeDestination(dto.destination, prefix, plan);
@@ -256,10 +256,10 @@ export class SoftphoneService {
   listCalls(actor: AuthUser, q: z.infer<typeof callListSchema>) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const rows = await tx.query(
-        `SELECT id, status, from_number, to_number, started_at, answered_at, ended_at, duration_seconds, hangup_cause, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.prefix')) AS prefix, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.entered')) AS entered
+        `SELECT id, status, from_number, to_number, started_at, answered_at, ended_at, duration_seconds, hangup_cause, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.prefix')) AS prefix, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.process.name')) AS process_name, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.entered')) AS entered
            FROM call_sessions WHERE tenant_id = :tenantId AND user_id = :me AND direction = 'outbound' AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.source')) = 'softphone'
           ORDER BY started_at DESC LIMIT ${q.limit} OFFSET ${q.offset}`, { me: actor.userId });
-      return { items: rows.map((r) => ({ id: r.id, status: r.status, from: r.from_number, dialed: r.to_number, entered: r.entered, prefix: r.prefix, startedAt: iso(r.started_at), answeredAt: iso(r.answered_at), endedAt: iso(r.ended_at), durationSeconds: r.duration_seconds, hangupCause: r.hangup_cause })) };
+      return { items: rows.map((r) => ({ id: r.id, status: r.status, from: r.from_number, dialed: r.to_number, entered: r.entered, prefix: r.prefix, processName: r.process_name, startedAt: iso(r.started_at), answeredAt: iso(r.answered_at), endedAt: iso(r.ended_at), durationSeconds: r.duration_seconds, hangupCause: r.hangup_cause })) };
     });
   }
 

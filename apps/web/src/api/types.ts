@@ -48,7 +48,7 @@ export interface CallView {
 }
 
 export interface SoftphoneCallView {
-  id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; answeredAt: string | null; endedAt: string | null;
+  id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; processName?: string | null; startedAt: string; answeredAt: string | null; endedAt: string | null;
   durationSeconds: number | null; hangupCause: string | null;
 }
 export interface SipAccountView {
@@ -56,7 +56,7 @@ export interface SipAccountView {
   hasPassword: boolean; registrationStatus: string; registeredAt: string | null; lastSeenAt: string | null; lastError: string | null;
 }
 
-export interface CallListSummary { id: string; name: string; fileName: string | null; agentId: string; agentName: string; total: number; invalid: number; createdAt: string; counts: Record<string, number> }
+export interface CallListSummary { processNames: string[]; id: string; name: string; fileName: string | null; agentId: string; agentName: string; total: number; invalid: number; createdAt: string; counts: Record<string, number> }
 export interface CallListItem {
   id: string; row: number; processName: string | null; serverHost: string | null; sipId: string | null; prefix: string | null; phone: string | null; dialed: string | null; status: string; result: string | null;
   sipCode: number | null; attempts: number; calledAt: string | null; answeredAt: string | null; endedAt: string | null; durationSeconds: number | null;

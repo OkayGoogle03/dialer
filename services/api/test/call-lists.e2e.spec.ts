@@ -87,7 +87,7 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
   it('lists are private to the agent and the managers; tenant isolated', async () => {
     expect((await t.http.get('/api/v1/call-lists').set(bearer(ag1)).expect(200)).body.items).toHaveLength(1);
     expect((await t.http.get('/api/v1/call-lists').set(bearer(ag2)).expect(200)).body.items).toHaveLength(0);
-    expect((await t.http.get('/api/v1/call-lists').set(bearer(a)).expect(200)).body.items[0]).toMatchObject({ name: 'Morning batch', total: 5, invalid: 3, counts: { pending: 2, invalid: 3 } });
+    expect((await t.http.get('/api/v1/call-lists').set(bearer(a)).expect(200)).body.items[0]).toMatchObject({ name: 'Morning batch', processNames: ['Sales Outbound'], total: 5, invalid: 3, counts: { pending: 2, invalid: 3 } });
     await t.http.get(`/api/v1/call-lists/${listId}/items`).set(bearer(ag2)).expect(404);
     await t.http.get(`/api/v1/call-lists/${listId}/items`).set(bearer(b)).expect(404);
     await t.http.get(`/api/v1/call-lists/${listId}/export`).set(bearer(b)).expect(404);
@@ -113,6 +113,8 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
       expect((await getItems(ag1)).items.find((i: { id: string }) => i.id === first.id).status).toBe(s);
     }
     await t.http.patch(`/api/v1/softphone/calls/${placed.callId}`).set(bearer(ag1)).send({ status: 'completed' }).expect(200);
+    // the process name is saved with the call and shown in the agent's call history
+    expect((await t.http.get('/api/v1/softphone/calls').set(bearer(ag1)).expect(200)).body.items.find((c: { id: string }) => c.id === placed.callId)).toMatchObject({ processName: 'Sales Outbound' });
     expect((await getItems(ag1)).items.find((i: { id: string }) => i.id === first.id)).toMatchObject({ status: 'completed', result: 'Call completed' });
 
     const p2 = (await t.http.post(`/api/v1/call-lists/${listId}/items/${intl.id}/call`).set(bearer(ag1)).expect(201)).body;
