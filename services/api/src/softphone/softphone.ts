@@ -13,6 +13,7 @@ import { iso, uuidSchema, z, ZodPipe } from '../master-data/common';
 import { webrtcUrl } from '../master-data/call-servers';
 import { DEFAULT_DIAL_PLAN } from '../master-data/processes';
 import { normalizeDestination } from '../routing/routing';
+import { classifyOutcome } from './call-outcome';
 
 const sipId = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9._@+-]+$/, 'letters, digits and . _ @ + - only');
 const sipSecret = z.string().min(1).max(200).regex(/^[^\r\n\0]+$/);
@@ -244,12 +245,15 @@ export class SoftphoneService {
     const p = { cid: callId, cause: dto.cause ? dto.cause.slice(0, 300) : null };
     if (dto.status === 'ringing') await tx.execute(`${base} status = 'ringing' ${where}`, p);
     else if (dto.status === 'answered') await tx.execute(`${base} status = 'answered', answered_at = UTC_TIMESTAMP(3), result = 'Call answered' ${where}`, p);
-    else if (dto.status === 'completed') {
-      await tx.execute(`${base} ended_at = UTC_TIMESTAMP(3), status = IF(answered_at IS NULL, 'not_answered', 'completed'), result = IF(answered_at IS NULL, COALESCE(:cause, 'Ended without being answered'), 'Call completed'),
-        duration_seconds = IF(answered_at IS NULL, 0, TIMESTAMPDIFF(SECOND, answered_at, UTC_TIMESTAMP(3))) ${where}`, p);
-    } else {
-      await tx.execute(`${base} ended_at = UTC_TIMESTAMP(3), status = 'failed', result = :r, sip_code = :code, duration_seconds = 0 ${where}`,
-        { ...p, r: (dto.cause ?? 'Call failed').slice(0, 300), code: dto.sipCode ?? null });
+    else {
+      // final outcome: Success (the phone was reached) or Not success (it never rang), with a note saying what the user did / why it did not connect
+      const [cur] = await tx.query<{ status: string; answered_at: Date | null }>(`SELECT status, answered_at FROM call_list_items ${where} FOR UPDATE`, { cid: callId });
+      if (!cur) return;
+      const answered = !!cur.answered_at;
+      const seconds = answered ? Math.max(0, Math.round((Date.now() - new Date(cur.answered_at as Date).getTime()) / 1000)) : 0;
+      const outcome = classifyOutcome({ final: dto.status === 'completed' ? 'completed' : 'failed', answered, rang: answered || cur.status === 'ringing', cause: dto.cause, sipCode: dto.sipCode, seconds });
+      await tx.execute(`${base} ended_at = UTC_TIMESTAMP(3), status = :st, result = :note, sip_code = :code, duration_seconds = :dur ${where}`,
+        { cid: callId, st: outcome.status, note: outcome.note.slice(0, 300), code: dto.sipCode ?? null, dur: answered ? seconds : 0 });
     }
   }
 

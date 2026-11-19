@@ -152,7 +152,7 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
   }, [auto, idle, next?.id, sp.reg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!lists.length) return null;
-  const redial = (i: CallListItem) => ['pending', 'failed', 'not_answered', 'completed'].includes(i.status);
+  const redial = (i: CallListItem) => ['pending', 'success', 'not_success', 'failed', 'not_answered', 'completed'].includes(i.status);
   return (
     <Card title="My call list" className="stack">
       <div className="row">

@@ -261,7 +261,7 @@ export class CallListsService {
   }
 }
 
-const STATUS_LABEL: Record<string, string> = { pending: 'Pending', calling: 'Calling', ringing: 'Ringing', answered: 'Answered', completed: 'Completed', not_answered: 'Not answered', failed: 'Failed', invalid: 'Invalid row' };
+const STATUS_LABEL: Record<string, string> = { success: 'Success', not_success: 'Not success', pending: 'Pending', calling: 'Calling', ringing: 'Ringing', answered: 'Answered', completed: 'Completed', not_answered: 'Not answered', failed: 'Failed', invalid: 'Invalid row' };
 
 
 const itemView = (r: Row) => ({

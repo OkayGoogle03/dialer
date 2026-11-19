@@ -101,7 +101,8 @@ export function useSoftphone() {
     s.on('ended', (e: any) => {
       clearRing();
       if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause }); setCall({ ...IDLE_CALL, note: timeoutCause + ' - call disconnected' }); session.current = null; return; }
-      track(base.callId, 'completed', { cause: String(e?.cause ?? 'normal').slice(0, 100) }); finishCall();
+      const remote = e?.originator === 'remote' || /remote/i.test(String(e?.cause ?? ''));
+      track(base.callId, 'completed', { cause: remote ? 'Called party disconnected' : 'Agent ended the call' }); finishCall();
     });
   }, [finishCall, track]);
 

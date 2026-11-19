@@ -4,9 +4,9 @@ import { api, saveBlob } from '../api/client';
 import type { CallListItem } from '../api/types';
 import { errText } from './kit';
 
-export const STATUS_LABEL: Record<string, string> = { pending: 'Pending', calling: 'Calling…', ringing: 'Ringing…', answered: 'On call', completed: 'Completed', not_answered: 'Not answered', failed: 'Failed', invalid: 'Invalid row' };
+export const STATUS_LABEL: Record<string, string> = { pending: 'Pending', calling: 'Calling…', ringing: 'Ringing…', answered: 'On call', success: 'Success', not_success: 'Not success', completed: 'Completed', not_answered: 'Not answered', failed: 'Failed', invalid: 'Invalid row' };
 const LIVE = ['calling', 'ringing', 'answered'];
-export const statusBadge = (s: string) => <Badge tone={s === 'completed' ? 'ok' : s === 'failed' || s === 'invalid' || s === 'not_answered' ? 'off' : undefined}>{STATUS_LABEL[s] ?? s}</Badge>;
+export const statusBadge = (s: string) => <Badge tone={s === 'success' || s === 'completed' ? 'ok' : s === 'not_success' || s === 'failed' || s === 'invalid' || s === 'not_answered' ? 'off' : undefined}>{STATUS_LABEL[s] ?? s}</Badge>;
 
 /** Live view of a list's rows: refreshes every 2 s while a call is in progress, every 8 s otherwise, and immediately when `kick` changes. */
 export function useListItems(listId: string | null, kick = 0) {
@@ -40,7 +40,7 @@ export function CallListRows({ items, error, action }: { items: CallListItem[] |
           { key: 'ph', header: 'Phone Number', render: (i) => <>{i.phone}{i.dialed && <div className="hint">dialled {i.dialed}</div>}</> },
           { key: 'pn', header: 'Process Name', render: (i) => i.processName ?? '' },
           { key: 'st', header: 'Status', render: (i) => <>{statusBadge(i.status)}{i.sipCode ? <span className="hint"> ({i.sipCode})</span> : null}</> },
-          { key: 'nt', header: 'Note', render: (i) => <span className="hint">{i.result ?? ''}{i.durationSeconds != null && i.status === 'completed' ? ` · ${i.durationSeconds}s` : ''}{i.attempts > 1 ? ` · attempt ${i.attempts}` : ''}</span> },
+          { key: 'nt', header: 'Note', render: (i) => <span className="hint">{i.result ?? ''}{i.attempts > 1 ? ` · attempt ${i.attempts}` : ''}</span> },
           ...(action ? [{ key: 'a', header: '', render: action }] : []),
         ]} />
     </>
@@ -48,6 +48,6 @@ export function CallListRows({ items, error, action }: { items: CallListItem[] |
 }
 
 export function Counts({ counts }: { counts: Record<string, number> }) {
-  const order = ['pending', 'calling', 'ringing', 'answered', 'completed', 'not_answered', 'failed', 'invalid'];
+  const order = ['pending', 'calling', 'ringing', 'answered', 'success', 'not_success', 'completed', 'not_answered', 'failed', 'invalid'];
   return <span className="hint">{order.filter((k) => counts[k]).map((k) => `${STATUS_LABEL[k].replace('…', '')}: ${counts[k]}`).join(' · ') || '—'}</span>;
 }

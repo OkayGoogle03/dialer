@@ -115,19 +115,23 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     await t.http.patch(`/api/v1/softphone/calls/${placed.callId}`).set(bearer(ag1)).send({ status: 'completed' }).expect(200);
     // the process name is saved with the call and shown in the agent's call history
     expect((await t.http.get('/api/v1/softphone/calls').set(bearer(ag1)).expect(200)).body.items.find((c: { id: string }) => c.id === placed.callId)).toMatchObject({ processName: 'Sales Outbound' });
-    expect((await getItems(ag1)).items.find((i: { id: string }) => i.id === first.id)).toMatchObject({ status: 'completed', result: 'Call completed' });
+    expect((await getItems(ag1)).items.find((i: { id: string }) => i.id === first.id)).toMatchObject({ status: 'success', result: expect.stringMatching(/Call answered and completed/) });
 
     const p2 = (await t.http.post(`/api/v1/call-lists/${listId}/items/${intl.id}/call`).set(bearer(ag1)).expect(201)).body;
     expect(p2.dialed).toBe('14155550100');
-    await t.http.patch(`/api/v1/softphone/calls/${p2.callId}`).set(bearer(ag1)).send({ status: 'failed', cause: 'Busy', sipCode: 486 }).expect(200);
-    expect((await getItems(ag1)).items.find((i: { id: string }) => i.id === intl.id)).toMatchObject({ status: 'failed', result: 'Busy', sipCode: 486 });
+    await t.http.patch(`/api/v1/softphone/calls/${p2.callId}`).set(bearer(ag1)).send({ status: 'failed', cause: 'Busy Here', sipCode: 486 }).expect(200);
+    expect((await getItems(ag1)).items.find((i: { id: string }) => i.id === intl.id)).toMatchObject({ status: 'success', result: expect.stringMatching(/busy or on another call/), sipCode: 486 });
     // a failed row can be retried
     const retry = (await t.http.post(`/api/v1/call-lists/${listId}/items/${intl.id}/call`).set(bearer(ag1)).expect(201)).body;
     // ring limit: the softphone cancels after the configured ring time and reports the call as ended without answer
     expect((await t.http.get('/api/v1/softphone/config').set(bearer(ag1)).expect(200)).body.ringTimeoutSeconds).toBe(5);
     await t.http.patch(`/api/v1/softphone/calls/${retry.callId}`).set(bearer(ag1)).send({ status: 'ringing' }).expect(200);
     await t.http.patch(`/api/v1/softphone/calls/${retry.callId}`).set(bearer(ag1)).send({ status: 'completed', cause: 'No answer within 5 s (ring limit)' }).expect(200);
-    expect((await getItems(ag1)).items.find((i: { id: string }) => i.id === intl.id)).toMatchObject({ status: 'not_answered', result: 'No answer within 5 s (ring limit)', attempts: 2 });
+    expect((await getItems(ag1)).items.find((i: { id: string }) => i.id === intl.id)).toMatchObject({ status: 'success', result: expect.stringMatching(/rang but the user did not answer/), attempts: 2 });
+    // a phone that is switched off / unreachable never rings: Not success with the reason
+    const third = (await t.http.post(`/api/v1/call-lists/${listId}/items/${intl.id}/call`).set(bearer(ag1)).expect(201)).body;
+    await t.http.patch(`/api/v1/softphone/calls/${third.callId}`).set(bearer(ag1)).send({ status: 'failed', cause: 'Temporarily Unavailable', sipCode: 480 }).expect(200);
+    expect((await getItems(ag1)).items.find((i: { id: string }) => i.id === intl.id)).toMatchObject({ status: 'not_success', result: expect.stringMatching(/switched off or not reachable/), sipCode: 480, attempts: 3 });
   });
 
   it('exports an Excel with every row and its outcome, without any SIP password', async () => {
@@ -141,7 +145,8 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     expect(ws.rowCount).toBe(6);
     const text = JSON.stringify(ws.getSheetValues());
     expect(text).not.toContain('excel-sip-secret-1');
-    expect(text).toContain('Completed');
+    expect(text).toContain('Success');
+    expect(text).toContain('Not success');
     expect(text).toContain('Sales Outbound');
     expect(text).toContain('Invalid row');
     expect(text).toContain('Phone Number must be');
