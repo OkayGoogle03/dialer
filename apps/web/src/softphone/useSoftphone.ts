@@ -8,7 +8,7 @@ export interface SoftphoneAccount {
   callServer: { id: string; name: string; host: string | null; port: number | null; transport: string; wsPath: string; realm: string | null; webrtcUrl: string | null; addressUpdatedAt: string | null };
 }
 export interface DialOption { assignmentId: string; processId: string; processName: string; prefix: string; callServerId: string }
-export interface SoftphoneConfig { accounts: SoftphoneAccount[]; dialOptions: DialOption[]; fetchedAt: string }
+export interface SoftphoneConfig { accounts: SoftphoneAccount[]; dialOptions: DialOption[]; fetchedAt: string; ringTimeoutSeconds?: number }
 
 export type RegState = 'idle' | 'connecting' | 'registered' | 'failed' | 'unavailable';
 export type CallState = 'idle' | 'dialing' | 'ringing' | 'in_call' | 'incoming';
@@ -41,6 +41,8 @@ export function useSoftphone() {
   const keyRef = useRef('');
   const audio = useRef<HTMLAudioElement | null>(null);
   const accountRef = useRef<SoftphoneAccount | undefined>(undefined);
+  const configRef = useRef<SoftphoneConfig | null>(null);
+  configRef.current = config;
   const callRef = useRef(call);
   callRef.current = call;
 
@@ -67,8 +69,18 @@ export function useSoftphone() {
   const wireSession = useCallback((s: any, base: ActiveCall) => {
     session.current = s;
     setCall(base);
-    s.on('progress', () => { setCall((c) => ({ ...c, state: 'ringing' })); track(base.callId, 'ringing'); });
+    // Maximum ringing time at the called party (server setting, default 5 s): after that the call is cancelled and recorded as not answered.
+    const ringMs = Math.max(1, configRef.current?.ringTimeoutSeconds ?? 5) * 1000;
+    let ringTimer: ReturnType<typeof setTimeout> | null = null;
+    let timedOut = false;
+    const clearRing = () => { if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; } };
+    const timeoutCause = `No answer within ${ringMs / 1000} s (ring limit)`;
+    s.on('progress', () => {
+      setCall((c) => ({ ...c, state: 'ringing' })); track(base.callId, 'ringing');
+      if (base.direction === 'out' && !ringTimer && !timedOut) ringTimer = setTimeout(() => { timedOut = true; try { s.terminate(); } catch { /* already ended */ } }, ringMs);
+    });
     s.on('accepted', () => {
+      clearRing();
       setCall((c) => ({ ...c, state: 'in_call', startedAt: Date.now() }));
       track(base.callId, 'answered');
     });
@@ -78,12 +90,18 @@ export function useSoftphone() {
       };
     });
     s.on('failed', (e: any) => {
+      clearRing();
+      if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause }); setCall({ ...IDLE_CALL, note: timeoutCause + ' - call disconnected' }); session.current = null; return; }
       const code = e?.message?.status_code as number | undefined;
       track(base.callId, 'failed', { cause: String(e?.cause ?? 'failed').slice(0, 100), ...(code ? { sipCode: code } : {}) });
       setCall({ ...IDLE_CALL, note: `Call failed: ${e?.cause ?? 'unknown'}${code ? ` (${code})` : ''}` });
       session.current = null;
     });
-    s.on('ended', (e: any) => { track(base.callId, 'completed', { cause: String(e?.cause ?? 'normal').slice(0, 100) }); finishCall(); });
+    s.on('ended', (e: any) => {
+      clearRing();
+      if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause }); setCall({ ...IDLE_CALL, note: timeoutCause + ' - call disconnected' }); session.current = null; return; }
+      track(base.callId, 'completed', { cause: String(e?.cause ?? 'normal').slice(0, 100) }); finishCall();
+    });
   }, [finishCall, track]);
 
   const startUa = useCallback(async (acct: SoftphoneAccount) => {

@@ -26,6 +26,8 @@ export interface AppConfig {
   desktopVersion: string;
   /** Transport given to call servers created from an Excel call list (the Excel has only the IP). */
   defaultSipTransport: 'wss' | 'ws' | 'udp' | 'tcp';
+  /** Maximum time an outbound call may ring at the called party before the softphone cancels it. */
+  ringTimeoutSeconds: number;
   natsUrl?: string;
   outboxRelayEnabled: boolean;
   /** Seconds a tenant status is cached by the auth guard (suspension propagation delay). */
@@ -77,6 +79,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     desktopDownloadUrl: /^(https:\/\/|\/(?!\/))\S+$/.test(env.DESKTOP_DOWNLOAD_URL ?? '') ? env.DESKTOP_DOWNLOAD_URL! : '',
     desktopVersion: (env.DESKTOP_VERSION ?? '').slice(0, 20),
     defaultSipTransport: (['wss', 'ws', 'udp', 'tcp'] as const).find((t) => t === env.DEFAULT_SIP_TRANSPORT) ?? 'wss',
+    ringTimeoutSeconds: int('RING_TIMEOUT_SECONDS', env.RING_TIMEOUT_SECONDS, 5, 1, 120),
     natsUrl: env.NATS_URL || undefined,
     outboxRelayEnabled: env.OUTBOX_RELAY_ENABLED === 'true',
     tenantStatusCacheSeconds: int('TENANT_STATUS_CACHE_SECONDS', env.TENANT_STATUS_CACHE_SECONDS, 15, 0, 300),

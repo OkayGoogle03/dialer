@@ -103,3 +103,6 @@ Verified: `pnpm --filter @dialer/desktop test` (6 Node tests) runs the engine ag
 
 ## Call list "Process Name" column (2026-11-19)
 Migration 0009 adds `call_list_items.process_name`. The call-list template now has a sixth, optional column **Process Name** (five-column files still import); it is stored per row, shown in the UI row table and included in the Excel export. It is a label only: no process record is created or used for routing. Verified by the call-lists API suite (6 tests, TiDB); the UI change was only typechecked/linted.
+
+## Ring limit (2026-11-19)
+Outbound calls are cancelled after `RING_TIMEOUT_SECONDS` (config file: 5) of ringing at the called party; the call is recorded as ended without answer, the list row shows "Not answered - No answer within 5 s (ring limit)" and the agent sees "call disconnected". Applies to both engines (browser JsSIP and the desktop app) because it is in the shared softphone hook; the value comes from `GET /softphone/config`. Verified: API test (config value, row status/result) and in a real browser against a fake SIP server that rings forever (ringing ~5 s, then CANCEL, row Not answered). Not verified on the desktop app or a real PBX; the timer starts at the first 180/183, so a call that never rings is not cut by this limit (the desktop engine still has its own 60 s setup timeout).

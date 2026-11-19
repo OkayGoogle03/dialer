@@ -1,3 +1,5 @@
+import { Inject } from '@nestjs/common';
+import { APP_CONFIG, AppConfig } from '../config/env';
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Header, HttpCode, Injectable, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -48,7 +50,7 @@ const NEXT: Record<string, string[]> = {
 
 @Injectable()
 export class SoftphoneService {
-  constructor(private readonly db: Database, private readonly audit: AuditService, private readonly secrets: SecretsService, private readonly outbox: OutboxService) {}
+  constructor(private readonly db: Database, private readonly audit: AuditService, private readonly secrets: SecretsService, private readonly outbox: OutboxService, @Inject(APP_CONFIG) private readonly appConfig: AppConfig) {}
 
   // ---------------------------------------------------------------- admin: SIP accounts
   listAccounts(actor: AuthUser, q: z.infer<typeof accountListSchema>) {
@@ -142,6 +144,7 @@ export class SoftphoneService {
         })),
         dialOptions,
         fetchedAt: new Date().toISOString(),
+        ringTimeoutSeconds: this.appConfig.ringTimeoutSeconds,
       };
     });
   }
@@ -238,11 +241,11 @@ export class SoftphoneService {
   private async syncListItem(tx: SqlRunner, callId: string, dto: z.infer<typeof callUpdateSchema>) {
     const base = `UPDATE call_list_items SET`;
     const where = `WHERE tenant_id = :tenantId AND call_session_id = :cid`;
-    const p = { cid: callId };
+    const p = { cid: callId, cause: dto.cause ? dto.cause.slice(0, 300) : null };
     if (dto.status === 'ringing') await tx.execute(`${base} status = 'ringing' ${where}`, p);
     else if (dto.status === 'answered') await tx.execute(`${base} status = 'answered', answered_at = UTC_TIMESTAMP(3), result = 'Call answered' ${where}`, p);
     else if (dto.status === 'completed') {
-      await tx.execute(`${base} ended_at = UTC_TIMESTAMP(3), status = IF(answered_at IS NULL, 'not_answered', 'completed'), result = IF(answered_at IS NULL, 'Ended without being answered', 'Call completed'),
+      await tx.execute(`${base} ended_at = UTC_TIMESTAMP(3), status = IF(answered_at IS NULL, 'not_answered', 'completed'), result = IF(answered_at IS NULL, COALESCE(:cause, 'Ended without being answered'), 'Call completed'),
         duration_seconds = IF(answered_at IS NULL, 0, TIMESTAMPDIFF(SECOND, answered_at, UTC_TIMESTAMP(3))) ${where}`, p);
     } else {
       await tx.execute(`${base} ended_at = UTC_TIMESTAMP(3), status = 'failed', result = :r, sip_code = :code, duration_seconds = 0 ${where}`,
