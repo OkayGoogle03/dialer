@@ -10,3 +10,4 @@ coverage/
 
 apps/desktop/release/
 apps/desktop/release-*/
+apps/desktop/release-check/
