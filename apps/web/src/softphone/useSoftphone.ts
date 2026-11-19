@@ -99,7 +99,7 @@ export function useSoftphone() {
     // a stopped UA keeps emitting events (e.g. 'disconnected'); ignore everything that is not the current UA
     const cur = () => ua.current === u;
     u.on('connected', () => cur() && setReg((r) => (r === 'registered' ? r : 'connecting')));
-    u.on('disconnected', () => { if (!cur()) return; setReg('failed'); setRegError('Cannot reach the call server. If its IP changed, your admin must update it; this page picks the change up automatically.'); report(acct.id, 'failed', 'transport disconnected'); });
+    u.on('disconnected', () => { if (!cur()) return; setReg('failed'); setRegError(`Cannot reach the call server at ${acct.callServer.webrtcUrl}. Check: (1) the address/port in Call Servers, (2) the PBX accepts WebSocket SIP on that port, (3) on this https site the address must be wss:// with a certificate the browser trusts (a bare IP usually needs a domain name + certificate), (4) firewall. If the IP changed, your admin updates it and this page picks it up automatically.`); report(acct.id, 'failed', 'transport disconnected'); });
     u.on('registered', () => { if (!cur()) return; setReg('registered'); setRegError(null); report(acct.id, 'registered'); });
     u.on('unregistered', () => { if (!cur()) return; setReg('idle'); report(acct.id, 'unregistered'); });
     u.on('registrationFailed', (e: any) => {

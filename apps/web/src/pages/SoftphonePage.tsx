@@ -63,7 +63,7 @@ export function SoftphonePage() {
     <>
       <PageHeader title="Softphone" actions={<Badge tone={sp.reg === 'registered' ? 'ok' : sp.reg === 'failed' || sp.reg === 'unavailable' ? 'off' : undefined}>{REG_LABEL[sp.reg]}</Badge>} />
       <Notice>
-        Your phone registers with the call server your administrator configured, using your own SIP ID. Dial a number and the selected process prefix is added automatically. If the server's IP changes, this page picks up the new address on its own.
+        Your phone registers with the call server your administrator configured, using your own SIP ID. Dial a number (or use your call list); the prefix is added automatically. If the server's IP changes, this page picks up the new address on its own.
       </Notice>
       {sp.regError && <Alert>{sp.regError}</Alert>}
       {sp.error && <Alert>{sp.error}</Alert>}
@@ -85,7 +85,7 @@ export function SoftphonePage() {
             </div>
           ) : (
             <form onSubmit={submit} noValidate style={{ maxWidth: 360 }}>
-              <SelectField label="Dial using (process / prefix)" value={option} onChange={(e) => setOption(e.target.value)} disabled={busy}
+              <SelectField label="Prefix" value={option} onChange={(e) => setOption(e.target.value)} disabled={busy}
                 options={[{ value: '', label: 'No prefix (dial as typed)' }, ...options.map((o) => ({ value: o.assignmentId, label: `${o.processName} — prefix ${o.prefix}` }))]} />
               <TextField label="Number" value={busy ? sp.call.number : number} onChange={(e) => setNumber(e.target.value)} disabled={busy} autoComplete="off" inputMode="tel"
                 hint={!busy && preview ? `Will dial: ${preview}` : busy ? 'Dialled number' : 'National number, or +E.164 for international (no prefix added)'} />
