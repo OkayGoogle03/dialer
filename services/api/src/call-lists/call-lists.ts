@@ -5,6 +5,8 @@ import { Throttle } from '@nestjs/throttler';
 import ExcelJS from 'exceljs';
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
+import { Inject } from '@nestjs/common';
+import { APP_CONFIG, AppConfig } from '../config/env';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser, RequestContext } from '../common/auth/auth.types';
 import { CurrentUser, ReqContext } from '../common/auth/decorators';
@@ -26,6 +28,9 @@ const listQuery = z.object({ userId: uuidSchema.optional() }).strict();
 
 /** Cells that Excel would read as a formula are neutralised in the export. */
 const safe = (v: string | null) => (v && /^[=@+-]/.test(v) && !/^\+?[0-9]+$/.test(v) ? `'${v}` : v ?? '');
+
+/** Standard port per transport: SIP 5060 (udp/tcp), WebSocket 8089 (wss) / 8088 (ws). */
+const defaultPort = (t: string) => (t === 'udp' || t === 'tcp' ? 5060 : t === 'ws' ? 8088 : 8089);
 
 interface Parsed { row: number; host: string; sipId: string; password: string; prefix: string; phone: string; error?: string }
 
@@ -80,7 +85,7 @@ async function parseList(buf: Buffer): Promise<Parsed[]> {
 
 @Injectable()
 export class CallListsService {
-  constructor(private readonly db: Database, private readonly audit: AuditService, private readonly secrets: SecretsService, private readonly softphone: SoftphoneService) {}
+  constructor(private readonly db: Database, private readonly audit: AuditService, private readonly secrets: SecretsService, private readonly softphone: SoftphoneService, @Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   private isAdmin = (a: AuthUser) => a.permissions.has('caller_import:manage');
 
@@ -107,7 +112,8 @@ export class CallListsService {
           if (s) servers.set(key, { id: s.id, usable: s.status === 'active' });
           else if (canCreateServers) {
             const id = newId();
-            await tx.execute(`INSERT INTO call_servers (id, tenant_id, name, host, address_updated_at, status, created_by) VALUES (:id, :tenantId, :n, :h, UTC_TIMESTAMP(3), 'active', :by)`, { id, n: r.host.slice(0, 100), h: r.host, by: actor.userId });
+            await tx.execute(`INSERT INTO call_servers (id, tenant_id, name, host, port, sip_transport, address_updated_at, status, created_by) VALUES (:id, :tenantId, :n, :h, :port, :tr, UTC_TIMESTAMP(3), 'active', :by)`,
+              { id, n: r.host.slice(0, 100), h: r.host, port: defaultPort(this.config.defaultSipTransport), tr: this.config.defaultSipTransport, by: actor.userId });
             servers.set(key, { id, usable: true }); createdServers++;
           } else servers.set(key, null);
         }

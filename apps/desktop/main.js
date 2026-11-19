@@ -4,6 +4,7 @@
 const { app, BrowserWindow, Menu, shell, session, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { SipUa } = require('./sip/sip-ua');
 
 const cfgFile = () => path.join(app.getPath('userData'), 'config.json');
 const readCfg = () => { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); } catch { return {}; } };
@@ -54,6 +55,7 @@ app.whenReady().then(() => {
     setImmediate(load);
     return { ok: true };
   });
+  registerSip();
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'Dialer', submenu: [
       { label: 'Server address…', click: () => win.loadFile(path.join(__dirname, 'settings.html')) },
@@ -65,4 +67,36 @@ app.whenReady().then(() => {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   createWindow();
 });
+// ---------------------------------------------------------------- native SIP (UDP/TCP) engine, driven by the hosted softphone page
+let sip = null;
+const fromTrustedPage = (e) => { try { return new URL(e.senderFrame.url).origin === serverOrigin(); } catch { return false; } };
+function emitSip(ev, data) { if (win && !win.isDestroyed()) win.webContents.send('sip:event', ev, data); }
+function registerSip() {
+  const guard = (fn) => (e, ...a) => { if (!fromTrustedPage(e)) throw new Error('untrusted page'); return fn(...a); };
+  ipcMain.handle('sip:start', guard(async (cfg) => {
+    if (sip) { try { sip.stop(); } catch { /* old agent */ } sip = null; }
+    const transport = cfg.transport === 'tcp' ? 'tcp' : 'udp';
+    const ua = new SipUa({ server: String(cfg.host), port: Number(cfg.port) || 5060, transport, sipId: String(cfg.sipId), password: String(cfg.password), realm: cfg.realm ? String(cfg.realm) : undefined, displayName: cfg.displayName ? String(cfg.displayName) : undefined });
+    sip = ua;
+    ua.on('registered', (d) => emitSip('registered', d));
+    ua.on('registrationFailed', (d) => emitSip('registrationFailed', d));
+    ua.on('disconnected', () => emitSip('disconnected', {}));
+    ua.on('error', (e) => emitSip('error', { message: String(e && e.message || e) }));
+    ua.on('call', (d) => emitSip('call', d));
+    ua.on('audio', (pcm) => { if (win && !win.isDestroyed()) win.webContents.send('sip:audio', pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength)); });
+    try { await ua.start(); return { ok: true, localIp: ua.localIp }; } catch (e) { sip = null; return { ok: false, message: String(e && e.message || e) }; }
+  }));
+  ipcMain.handle('sip:stop', guard(() => { if (sip) { sip.stop(); sip = null; } }));
+  ipcMain.handle('sip:call', guard(async (target) => {
+    if (!sip) return { ok: false, message: 'Not started' };
+    if (!/^sip:[A-Za-z0-9._+*#-]+@[A-Za-z0-9.:[]-]+$/.test(String(target))) return { ok: false, message: 'Invalid target' };
+    try { await sip.callTo(String(target)); return { ok: true }; } catch (e) { return { ok: false, message: String(e.message || e) }; }
+  }));
+  ipcMain.handle('sip:hangup', guard(() => sip && sip.hangup()));
+  ipcMain.handle('sip:answer', guard(() => sip && sip.answer()));
+  ipcMain.handle('sip:mute', guard((m) => sip && sip.setMuted(!!m)));
+  ipcMain.handle('sip:dtmf', guard((d) => sip && sip.sendDtmf(String(d).slice(0, 1))));
+  ipcMain.on('sip:audio-out', (e, buf) => { if (fromTrustedPage(e) && sip && buf) sip.sendAudio(new Int16Array(buf)); });
+}
+app.on('before-quit', () => { if (sip) { try { sip.stop(); } catch { /* quitting */ } } });
 app.on('window-all-closed', () => app.quit());

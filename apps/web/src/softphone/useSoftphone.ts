@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { errText } from '../components/kit';
+import { isNativeTransport, nativeAvailable, startNative } from './nativeEngine';
 
 export interface SoftphoneAccount {
   id: string; sipId: string; displayName: string | null; password: string;
@@ -87,7 +88,23 @@ export function useSoftphone() {
 
   const startUa = useCallback(async (acct: SoftphoneAccount) => {
     stopUa();
-    if (!acct.callServer.webrtcUrl) { setReg('unavailable'); setRegError('This call server is configured with a transport the browser cannot use (needs WSS/WS). Use the desktop app, or ask your admin to enable WebSocket.'); return; }
+    if (isNativeTransport(acct.callServer.transport)) {
+      if (!nativeAvailable()) { setReg('unavailable'); setRegError(`This call server uses ${acct.callServer.transport.toUpperCase()} SIP, which a browser cannot do. Install the Windows desktop app (sidebar: Download App) and sign in there.`); return; }
+      setReg('connecting'); setRegError(null);
+      const key = uaKey(acct);
+      keyRef.current = key;
+      try {
+        const native = await startNative({ host: acct.callServer.host ?? '', port: acct.callServer.port ?? (acct.callServer.transport === 'tcp' ? 5060 : 5060), transport: acct.callServer.transport, sipId: acct.sipId, password: acct.password, realm: acct.callServer.realm, displayName: acct.displayName }, {
+          onRegistered: () => { if (keyRef.current !== key) return; setReg('registered'); setRegError(null); report(acct.id, 'registered'); },
+          onFailed: (m) => { if (keyRef.current !== key) return; setReg('failed'); setRegError(`Registration failed: ${m}`); report(acct.id, 'failed', m); },
+          onDisconnected: () => { if (keyRef.current !== key) return; setReg('failed'); setRegError('Connection to the call server was lost.'); report(acct.id, 'failed', 'connection lost'); },
+          onIncoming: (s, from) => { if (session.current) { s.terminate(); return; } wireSession(s, { ...IDLE_CALL, state: 'incoming', direction: 'in', number: from }); },
+        });
+        ua.current = { call: native.call, stop: native.stop };
+      } catch (e) { setReg('failed'); setRegError(`Could not start the desktop SIP engine: ${e instanceof Error ? e.message : 'error'}`); }
+      return;
+    }
+    if (!acct.callServer.webrtcUrl) { setReg('unavailable'); setRegError('This call server is configured with a transport the browser cannot use (needs WSS/WS).'); return; }
     const { default: JsSIP } = await import('jssip');
     const realm = acct.callServer.realm || acct.callServer.host || '';
     setReg('connecting'); setRegError(null);
@@ -152,8 +169,8 @@ export function useSoftphone() {
   useEffect(() => { if (account && uaKey(account) !== keyRef.current && !callRef.current.callId) void startUa(account); }, [accountId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Dials what the server returned (prefix already applied) and wires the call events. */
-  const startCall = useCallback((placed: { callId: string; dialed: string; prefix: string; target: string }) => {
-    const s = ua.current.call(placed.target, { mediaConstraints: { audio: true, video: false }, rtcOfferConstraints: { offerToReceiveAudio: true }, pcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
+  const startCall = useCallback(async (placed: { callId: string; dialed: string; prefix: string; target: string }) => {
+    const s = await ua.current.call(placed.target, { mediaConstraints: { audio: true, video: false }, rtcOfferConstraints: { offerToReceiveAudio: true }, pcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
     wireSession(s, { ...IDLE_CALL, state: 'dialing', number: placed.dialed, callId: placed.callId, note: placed.prefix ? `Prefix ${placed.prefix} applied` : null });
   }, [wireSession]);
 
@@ -163,7 +180,7 @@ export function useSoftphone() {
     setError(null);
     try {
       const placed = await api.post<{ callId: string; dialed: string; prefix: string; target: string }>('/softphone/calls', { accountId: acct.id, destination, ...(assignmentId ? { assignmentId } : {}) });
-      startCall(placed);
+      await startCall(placed);
     } catch (e) { setError(errText(e, 'Could not place the call')); }
   }, [reg, startCall]);
 
@@ -178,7 +195,7 @@ export function useSoftphone() {
         setError('This row belongs to a different SIP account than the one registered. Select that account first.');
         return false;
       }
-      startCall(placed);
+      await startCall(placed);
       return true;
     } catch (e) { setError(errText(e, 'Could not place the call')); return false; }
   }, [reg, startCall]);

@@ -136,7 +136,7 @@ export class SoftphoneService {
         accounts: rows.map((r) => ({
           id: r.id, sipId: r.sip_id, displayName: r.display_name, password: this.secrets.decrypt(r.sip_secret_encrypted),
           callServer: {
-            id: r.server_id, name: r.server_name, host: r.host, port: r.port, transport: r.sip_transport, wsPath: r.sip_ws_path, realm: r.sip_realm || r.host,
+            id: r.server_id, name: r.server_name, host: r.host, port: r.port ?? (r.sip_transport === 'udp' || r.sip_transport === 'tcp' ? 5060 : r.sip_transport === 'tls' ? 5061 : null), transport: r.sip_transport, wsPath: r.sip_ws_path, realm: r.sip_realm || r.host,
             webrtcUrl: webrtcUrl(r.host, r.port, r.sip_transport, r.sip_ws_path), addressUpdatedAt: iso(r.address_updated_at),
           },
         })),

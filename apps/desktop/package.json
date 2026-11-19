@@ -1,6 +1,6 @@
 {
   "name": "@dialer/desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Project Dialer - Windows desktop softphone",
   "author": "Project Dialer",
@@ -8,12 +8,13 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win nsis --x64",
-    "pack": "electron-builder --win dir --x64"
+    "pack": "electron-builder --win dir --x64",
+    "test": "node --test sip/sip-ua.test.js"
   },
   "build": {
     "appId": "com.projectdialer.desktop",
     "productName": "Project Dialer",
-    "files": ["main.js", "preload.js", "settings.html", "package.json"],
+    "files": ["main.js", "preload.js", "settings.html", "sip/sip-ua.js", "package.json"],
     "directories": { "output": "release" },
     "win": { "target": "nsis" },
     "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true }

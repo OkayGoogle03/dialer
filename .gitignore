@@ -9,3 +9,4 @@ coverage/
 .DS_Store
 
 apps/desktop/release/
+apps/desktop/release-*/

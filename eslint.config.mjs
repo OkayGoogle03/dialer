@@ -38,4 +38,5 @@ export default tseslint.config(
     // tests use a raw owner connection for assertions; the tenant guard rule targets application code
     rules: { 'no-restricted-syntax': 'off' },
   },
+  { files: ['apps/desktop/**/*.js'], rules: { '@typescript-eslint/no-require-imports': 'off' } },
 );

@@ -24,6 +24,8 @@ export interface AppConfig {
   /** Where the Windows installer is hosted (non-secret, https). Empty = the Download page says it is not published yet. */
   desktopDownloadUrl: string;
   desktopVersion: string;
+  /** Transport given to call servers created from an Excel call list (the Excel has only the IP). */
+  defaultSipTransport: 'wss' | 'ws' | 'udp' | 'tcp';
   natsUrl?: string;
   outboxRelayEnabled: boolean;
   /** Seconds a tenant status is cached by the auth guard (suspension propagation delay). */
@@ -74,6 +76,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     corsOrigins: (env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     desktopDownloadUrl: /^(https:\/\/|\/(?!\/))\S+$/.test(env.DESKTOP_DOWNLOAD_URL ?? '') ? env.DESKTOP_DOWNLOAD_URL! : '',
     desktopVersion: (env.DESKTOP_VERSION ?? '').slice(0, 20),
+    defaultSipTransport: (['wss', 'ws', 'udp', 'tcp'] as const).find((t) => t === env.DEFAULT_SIP_TRANSPORT) ?? 'wss',
     natsUrl: env.NATS_URL || undefined,
     outboxRelayEnabled: env.OUTBOX_RELAY_ENABLED === 'true',
     tenantStatusCacheSeconds: int('TENANT_STATUS_CACHE_SECONDS', env.TENANT_STATUS_CACHE_SECONDS, 15, 0, 300),
