@@ -20,7 +20,7 @@ export interface ProcessView {
   dialPlan: { stripLeadingZeros: boolean; minLength: number; maxLength: number; allowedDestinationPrefixes: string[]; blockedDestinationPrefixes: string[] };
 }
 export interface CallServerView {
-  id: string; name: string; host: string | null; port: number | null; instanceId: string | null; ariUrl: string | null; ariUsername: string | null; hasPassword: boolean;
+  id: string; name: string; host: string | null; port: number | null; sipTransport: string; sipWsPath: string; sipRealm: string | null; addressUpdatedAt: string | null; webrtcUrl: string | null; instanceId: string | null; ariUrl: string | null; ariUsername: string | null; hasPassword: boolean;
   environment: string; connectionStatus: string; connectionError: string | null; maxConcurrentCalls: number; status: string;
 }
 export interface AssignmentsView {
@@ -45,4 +45,13 @@ export interface CallView {
   id: string; status: string; destination: string; callerId: string; startedAt: string; endedAt: string | null;
   route: { process: string; provider: string; trunk: string; did: string; prefix: string; callServer: string };
   attempts: { attempt: number; provider: string; status: string; failureCode: string | null }[]; warning?: string;
+}
+
+export interface SoftphoneCallView {
+  id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; answeredAt: string | null; endedAt: string | null;
+  durationSeconds: number | null; hangupCause: string | null;
+}
+export interface SipAccountView {
+  id: string; userId: string; userEmail: string; userName: string; callServerId: string; callServerName: string; sipId: string; displayName: string | null; status: string;
+  hasPassword: boolean; registrationStatus: string; registeredAt: string | null; lastSeenAt: string | null; lastError: string | null;
 }

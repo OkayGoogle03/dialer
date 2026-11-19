@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 const NAV: { to: string; label: string; perm?: string }[] = [
   { to: '/', label: 'Dashboard' },
   { to: '/users', label: 'Users', perm: 'users:read' },
-  { to: '/dialer', label: 'Dialer', perm: 'calls:make' },
+  { to: '/softphone', label: 'Softphone', perm: 'calls:make' },
   { to: '/caller-import', label: 'Caller Excel Import', perm: 'caller_import:manage' },
   { to: '/processes', label: 'Processes', perm: 'master_data:read' },
   { to: '/providers', label: 'SIP Providers', perm: 'master_data:read' },

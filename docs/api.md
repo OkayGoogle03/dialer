@@ -50,3 +50,8 @@ Caller import (`caller_import:manage`): `POST|GET /caller-import/template` -> `P
 
 Dialer (`calls:make`): `POST /dialer/route-preview`, `POST /dialer/calls` (202; optional `Idempotency-Key`), `POST /dialer/calls/:id/hangup`, `GET /dialer/calls[/:id]`, `GET /dialer/stats` (`calls:read_all`).
 The spec's `/api/...` paths follow the project convention `/api/v1/...`; the template endpoint accepts POST and GET.
+
+## Softphone (migration 0007)
+Admin (`call_servers:manage`): `GET|POST /softphone-accounts` (`?userId=`, `?callServerId=`), `PUT|DELETE /softphone-accounts/:id`. Body: `{userId, callServerId, sipId, password, displayName?}`. The password is write-only; views carry `hasPassword` only. One account per user per call server; SIP ID unique per call server (409 otherwise).
+Call servers additionally accept/return `sipTransport` (wss|ws|udp|tcp|tls), `sipWsPath`, `sipRealm`, `addressUpdatedAt`, derived `webrtcUrl`. Changing host/port/transport updates `addressUpdatedAt` and never deactivates the server; activation requires `host`.
+Agent (`calls:make`, own data only): `GET /softphone/config` (own accounts incl. decrypted SIP password, call-server address, `dialOptions` = process + prefix per call server; `Cache-Control: no-store`), `POST /softphone/registration` `{accountId,state,error?}`, `POST /softphone/calls` `{accountId,destination,assignmentId?}` -> `{callId,dialed,prefix,target}`, `PATCH /softphone/calls/:id` `{status: ringing|answered|completed|failed, cause?, sipCode?}`, `GET /softphone/calls`.

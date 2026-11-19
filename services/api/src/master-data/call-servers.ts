@@ -14,11 +14,17 @@ const ariUrl = z.string().trim().max(500).refine((v) => {
 }, 'Must be an http(s) URL without embedded credentials');
 const ariUser = z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._@-]+$/);
 const ariPassword = z.string().min(1).max(200).regex(/^[^\r\n\0]+$/);
+const sipTransport = z.enum(['wss', 'ws', 'udp', 'tcp', 'tls']);
+const sipWsPath = z.string().trim().regex(/^\/[A-Za-z0-9._~/-]{0,99}$/, 'Must start with / (for example /ws)');
+const sipRealm = z.string().trim().regex(HOST_RE, 'invalid realm / SIP domain');
 
 export const callServerCreateSchema = z.object({
   name: nameSchema,
   host: z.string().trim().regex(HOST_RE, 'invalid host').optional(),
   port: intRange(1, 65535).optional(),
+  sipTransport: sipTransport.default('wss'),
+  sipWsPath: sipWsPath.default('/ws'),
+  sipRealm: sipRealm.optional(),
   instanceId: z.string().trim().max(100).regex(/^[A-Za-z0-9._-]+$/).optional(),
   ariUrl: ariUrl.optional(),
   ariUsername: ariUser.optional(),
@@ -31,6 +37,9 @@ export const callServerUpdateSchema = z.object({
   name: nameSchema.optional(),
   host: z.string().trim().regex(HOST_RE).nullable().optional(),
   port: intRange(1, 65535).nullable().optional(),
+  sipTransport: sipTransport.optional(),
+  sipWsPath: sipWsPath.optional(),
+  sipRealm: sipRealm.nullable().optional(),
   instanceId: z.string().trim().max(100).regex(/^[A-Za-z0-9._-]+$/).nullable().optional(),
   ariUrl: ariUrl.nullable().optional(),
   ariUsername: ariUser.nullable().optional(),
@@ -40,16 +49,30 @@ export const callServerUpdateSchema = z.object({
   status: z.enum(['pending_configuration', 'active', 'disabled']).optional(),
 }).strict();
 
-const COLS = `s.id, s.name, s.host, s.port, s.instance_id, s.ari_url, s.ari_username, s.ari_secret_encrypted IS NOT NULL AS has_password, s.environment,
-  s.connection_status, s.connection_checked_at, s.connection_error, s.max_concurrent_calls, s.status, s.created_at`;
+const COLS = `s.id, s.name, s.host, s.port, s.sip_transport, s.sip_ws_path, s.sip_realm, s.address_updated_at, s.instance_id, s.ari_url, s.ari_username,
+  s.ari_secret_encrypted IS NOT NULL AS has_password, s.environment, s.connection_status, s.connection_checked_at, s.connection_error,
+  s.max_concurrent_calls, s.status, s.created_at`;
+
+/** Default WebSocket port per transport when the admin has not set one (Asterisk: 8089 for wss, 8088 for ws). */
+const defaultPort = (transport: string) => (transport === 'ws' ? 8088 : 8089);
+
+/** wss://host:port/path for browser (WebRTC) softphones; null for transports a browser cannot use. */
+export function webrtcUrl(host: string | null, port: number | null, transport: string, path: string): string | null {
+  if (!host || (transport !== 'wss' && transport !== 'ws')) return null;
+  const h = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host; // IPv6 literal
+  return `${transport}://${h}:${port ?? defaultPort(transport)}${path}`;
+}
 
 export const callServerView = (r: Row) => ({
-  id: r.id, name: r.name, host: r.host, port: r.port, instanceId: r.instance_id, ariUrl: r.ari_url, ariUsername: r.ari_username, hasPassword: !!r.has_password,
+  id: r.id, name: r.name, host: r.host, port: r.port, sipTransport: r.sip_transport, sipWsPath: r.sip_ws_path, sipRealm: r.sip_realm,
+  addressUpdatedAt: iso(r.address_updated_at), webrtcUrl: webrtcUrl(r.host, r.port, r.sip_transport, r.sip_ws_path),
+  instanceId: r.instance_id, ariUrl: r.ari_url, ariUsername: r.ari_username, hasPassword: !!r.has_password,
   environment: r.environment, connectionStatus: r.connection_status, connectionCheckedAt: iso(r.connection_checked_at), connectionError: r.connection_error,
   maxConcurrentCalls: r.max_concurrent_calls, status: r.status, createdAt: iso(r.created_at),
 });
 
-const CONNECTION = ['host', 'port', 'instanceId', 'ariUrl', 'ariUsername', 'ariPassword'];
+const ADDRESS = ['host', 'port', 'sipTransport', 'sipWsPath', 'sipRealm'];
+const ARI = ['ariUrl', 'ariUsername', 'ariPassword'];
 
 @Injectable()
 export class CallServersService {
@@ -75,10 +98,11 @@ export class CallServersService {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const id = newId();
       await tx.execute(
-        `INSERT INTO call_servers (id, tenant_id, name, host, port, instance_id, ari_url, ari_username, ari_secret_encrypted, environment, max_concurrent_calls, created_by)
-         VALUES (:id, :tenantId, :n, :h, :port, :inst, :url, :u, :secret, :env, :m, :by)`,
-        { id, n: dto.name, h: dto.host ?? null, port: dto.port ?? null, inst: dto.instanceId ?? null, url: dto.ariUrl ?? null, u: dto.ariUsername ?? null,
-          secret: dto.ariPassword ? this.secrets.encrypt(dto.ariPassword) : null, env: dto.environment, m: dto.maxConcurrentCalls, by: actor.userId },
+        `INSERT INTO call_servers (id, tenant_id, name, host, port, sip_transport, sip_ws_path, sip_realm, address_updated_at, instance_id, ari_url, ari_username, ari_secret_encrypted, environment, max_concurrent_calls, created_by)
+         VALUES (:id, :tenantId, :n, :h, :port, :tr, :wp, :realm, :au, :inst, :url, :u, :secret, :env, :m, :by)`,
+        { id, n: dto.name, h: dto.host ?? null, port: dto.port ?? null, tr: dto.sipTransport, wp: dto.sipWsPath, realm: dto.sipRealm ?? null, au: dto.host ? new Date() : null,
+          inst: dto.instanceId ?? null, url: dto.ariUrl ?? null, u: dto.ariUsername ?? null, secret: dto.ariPassword ? this.secrets.encrypt(dto.ariPassword) : null,
+          env: dto.environment, m: dto.maxConcurrentCalls, by: actor.userId },
       );
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_server.created', entityType: 'call_server', entityId: id, metadata: { name: dto.name } }, ctx);
       return this.load(tx, id);
@@ -88,21 +112,25 @@ export class CallServersService {
   update(actor: AuthUser, id: string, dto: z.infer<typeof callServerUpdateSchema>, ctx: RequestContext) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const cur = await this.load(tx, id, true);
-      const changed = CONNECTION.some((k) => (dto as Record<string, unknown>)[k] !== undefined && (k === 'ariPassword' || (dto as Record<string, unknown>)[k] !== (cur as Record<string, unknown>)[k]));
-      let status = dto.status;
-      if (status === 'active' && !changed && cur.connectionStatus !== 'connected') throw new BadRequestException('A call server can be activated only after a successful connectivity test');
+      const differs = (k: string) => (dto as Record<string, unknown>)[k] !== undefined && (dto as Record<string, unknown>)[k] !== (cur as Record<string, unknown>)[k];
+      // The SIP address changes routinely (dynamic IP): record when, never deactivate because of it.
+      const addressChanged = ADDRESS.some(differs);
+      // ARI settings changed: the earlier connectivity result no longer applies.
+      const ariChanged = ARI.some((k) => (dto as Record<string, unknown>)[k] !== undefined && (k === 'ariPassword' || differs(k)));
+      const host = dto.host === undefined ? cur.host : dto.host;
+      if (dto.status === 'active' && cur.status !== 'active' && !host) {
+        throw new BadRequestException('Set the call server\'s SIP address (IP or host name) before activating it');
+      }
       const p: Record<string, unknown> = { id };
       const sets = buildSet(
-        { name: 'name', host: 'host', port: 'port', instanceId: 'instance_id', ariUrl: 'ari_url', ariUsername: 'ari_username', environment: 'environment', maxConcurrentCalls: 'max_concurrent_calls' }, dto, p);
+        { name: 'name', host: 'host', port: 'port', sipTransport: 'sip_transport', sipWsPath: 'sip_ws_path', sipRealm: 'sip_realm', instanceId: 'instance_id',
+          ariUrl: 'ari_url', ariUsername: 'ari_username', environment: 'environment', maxConcurrentCalls: 'max_concurrent_calls', status: 'status' }, dto, p);
       if (dto.ariPassword) { sets.push('ari_secret_encrypted = :secret'); p.secret = this.secrets.encrypt(dto.ariPassword); }
-      if (changed) {
-        // Connection settings changed: earlier connectivity result no longer applies.
-        sets.push(`connection_status = 'unknown'`, 'connection_checked_at = NULL', 'connection_error = NULL');
-        if (cur.status === 'active' || status === 'active') status = 'pending_configuration';
-      }
-      if (status) { sets.push('status = :status'); p.status = status; }
+      if (addressChanged) sets.push('address_updated_at = UTC_TIMESTAMP(3)');
+      if (ariChanged) sets.push(`connection_status = 'unknown'`, 'connection_checked_at = NULL', 'connection_error = NULL');
       if (sets.length) await tx.execute(`UPDATE call_servers SET ${sets.join(', ')} WHERE tenant_id = :tenantId AND id = :id`, p);
-      await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_server.updated', entityType: 'call_server', entityId: id, metadata: { fields: Object.keys(dto).map((k) => (k === 'ariPassword' ? 'ariPassword(changed)' : k)), connectionReset: changed } }, ctx);
+      await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_server.updated', entityType: 'call_server', entityId: id,
+        metadata: { fields: Object.keys(dto).map((k) => (k === 'ariPassword' ? 'ariPassword(changed)' : k)), addressChanged, ariReset: ariChanged } }, ctx);
       return this.load(tx, id);
     });
   }
@@ -111,14 +139,16 @@ export class CallServersService {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const cur = await this.load(tx, id, true);
       const [{ n }] = await tx.query<{ n: number }>(
-        `SELECT (SELECT COUNT(*) FROM caller_assignments WHERE tenant_id = :tenantId AND call_server_id = :id) + (SELECT COUNT(*) FROM process_server_assignments WHERE tenant_id = :tenantId AND call_server_id = :id) AS n`, { id });
-      if (Number(n) > 0) throw new ConflictException(`Call server "${cur.name}" is assigned to a process`);
+        `SELECT (SELECT COUNT(*) FROM caller_assignments WHERE tenant_id = :tenantId AND call_server_id = :id)
+              + (SELECT COUNT(*) FROM process_server_assignments WHERE tenant_id = :tenantId AND call_server_id = :id)
+              + (SELECT COUNT(*) FROM softphone_accounts WHERE tenant_id = :tenantId AND call_server_id = :id AND deleted_at IS NULL) AS n`, { id });
+      if (Number(n) > 0) throw new ConflictException(`Call server "${cur.name}" is assigned to a process or has SIP accounts`);
       await tx.execute(`UPDATE call_servers SET deleted_at = UTC_TIMESTAMP(3), status = 'disabled' WHERE tenant_id = :tenantId AND id = :id`, { id });
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_server.deleted', entityType: 'call_server', entityId: id, metadata: { name: cur.name } }, ctx);
     });
   }
 
-  /** Real ARI call. "connected" is recorded only if the server actually answers with the stored credentials. */
+  /** Real ARI call (only needed for server-side call control). "connected" is recorded only if the server answers with the stored credentials. */
   async test(actor: AuthUser, id: string, ctx: RequestContext) {
     const secrets = await this.db.withTenant(actor.tenantId, async (tx) => {
       await this.load(tx, id);

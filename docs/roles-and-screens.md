@@ -24,7 +24,7 @@ Permission sets as implemented in `packages/shared-types/src/rbac.ts`.
 | Screen / module | Tenant Admin | Supervisor | Team Leader | Agent | Auditor | Billing Admin |
 |---|---|---|---|---|---|---|
 | Dashboard | yes | yes | yes | yes | yes | yes |
-| Dialer (place/hang up calls, own calls) | yes | yes | yes | **yes** | – | – |
+| Softphone (register own SIP account, dial with prefix, own calls) | yes | yes | yes | **yes** | – | – |
 | Caller Excel Import | yes | yes | – | – | – | – |
 | Processes (view) | yes | view | view | – | – | – |
 | SIP Providers / Trunks (view) | yes | view | view | – | – | – |
@@ -42,7 +42,7 @@ Permission sets as implemented in `packages/shared-types/src/rbac.ts`.
 
 Notes:
 - Custom roles can be built from the 31 permissions by a Tenant Admin; nobody can grant or manage permissions they do not hold themselves.
-- Agents choose a process through a dedicated Dialer endpoint, so they need no master-data access (fixed in this change: previously the Dialer screen failed for agents).
+- Agents get their dial options (process + prefix) from the softphone config endpoint, so they need no master-data access (fixed in this change: previously the Dialer screen failed for agents).
 - Supervisors can approve Excel-import proposals (records are created as *Pending*) but cannot activate or verify anything.
 
 ## Screens required but not built yet (from the product spec)
@@ -64,8 +64,8 @@ Notes:
 |---|---|---|
 | Platform super admin | Platform overview (client companies, active/suspended, users, plans, newest companies) | Overview, Tenants only |
 | Tenant Admin | Calling-setup checklist, latest calls, last 24 h, people | all tenant screens |
-| Supervisor / Team Leader | Setup status (read-only, "Ask an administrator"), latest calls, last 24 h, people | Dashboard, Users, Dialer, Caller Excel Import (supervisor), Processes, SIP Providers, DIDs, Call Servers, Teams |
-| Agent | My recent calls + Open dialer | Dashboard, Dialer |
+| Supervisor / Team Leader | Setup status (read-only, "Ask an administrator"), latest calls, last 24 h, people | Dashboard, Users, Softphone, Caller Excel Import (supervisor), Processes, SIP Providers, DIDs, Call Servers, Teams |
+| Agent | My recent calls + Open softphone | Dashboard, Softphone |
 | Auditor | Last 24 h, people | Dashboard, Users, Teams |
 | Billing Admin | Explains that billing screens are not available yet | Dashboard |
 

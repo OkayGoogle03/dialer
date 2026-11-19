@@ -16,7 +16,7 @@
 ## Planned
 | Control | Phase |
 |---|---|
-| SIP/provider credential encryption (AES-256-GCM, key from secret manager), never returned to clients; extensions get short-lived SIP credentials via backend | 2 |
+| SIP/provider credential encryption (AES-256-GCM, key from secret manager), never returned to admins or in lists. **Exception (D-041):** an agent's own SIP password is delivered to that agent's browser softphone only (`GET /softphone/config`, no-store, audited), because JsSIP must hold it to REGISTER | 2 |
 | TLS for SIP, SRTP/DTLS-SRTP, Kamailio pike/anti-flood, destination/country allow-lists, spend & concurrency limits, caller-ID validation | 2 |
 | Signed, short-TTL recording URLs; retention purge jobs; export permission checks | 2 |
 | DNC suppression check before every dial; calling windows by contact timezone; abandonment caps; consent + opt-out handling; AI disclosure | 4–6 |

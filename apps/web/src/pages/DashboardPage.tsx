@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Alert, Badge, Button, Card, DataTable, EmptyState } from '@dialer/ui';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import type { CallServerView, CallView, DidView, Paged, ProcessView, ProviderView } from '../api/types';
+import type { CallServerView, Paged, ProcessView, SoftphoneCallView } from '../api/types';
 import { errText, statusTone } from '../components/kit';
 
 const ROLE_LABEL: Record<string, string> = {
@@ -39,26 +39,25 @@ export function DashboardPage() {
 /** Checklist for administrators: what still blocks calls from being placed. */
 function SetupCard({ canImport }: { canImport: boolean }) {
   const { can } = useAuth();
-  const [data, setData] = useState<{ providers: ProviderView[]; dids: DidView[]; servers: CallServerView[]; processes: ProcessView[] } | null>(null);
+  const [data, setData] = useState<{ servers: CallServerView[]; processes: ProcessView[]; accounts: number | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     Promise.all([
-      api.get<Paged<ProviderView>>('/providers?limit=200'), api.get<Paged<DidView>>('/dids?limit=200'),
       api.get<Paged<CallServerView>>('/call-servers?limit=200'), api.get<Paged<ProcessView>>('/processes?limit=200'),
-    ]).then(([p, d, s, pr]) => setData({ providers: p.items, dids: d.items, servers: s.items, processes: pr.items })).catch((e) => setError(errText(e, 'Failed to load setup status')));
-  }, []);
+      can('call_servers:manage') ? api.get<{ items: unknown[] }>('/softphone-accounts').then((r) => r.items.length) : Promise.resolve(null),
+    ]).then(([s, pr, accounts]) => setData({ servers: s.items, processes: pr.items, accounts })).catch((e) => setError(errText(e, 'Failed to load setup status')));
+  }, [can]);
   if (error) return <Alert>{error}</Alert>;
   if (!data) return <Card title="Calling setup"><EmptyState>Loading…</EmptyState></Card>;
   const items = [
-    { label: 'A SIP provider with an active trunk', done: data.providers.some((p) => p.activeTrunks > 0 && p.status === 'active'), to: '/providers', manage: can('sip_providers:manage'), detail: `${data.providers.length} providers` },
-    { label: 'A verified, active DID', done: data.dids.some((d) => d.status === 'active'), to: '/dids', manage: can('sip_providers:manage'), detail: `${data.dids.length} DIDs` },
-    { label: 'A connected call server', done: data.servers.some((s) => s.status === 'active' && s.connectionStatus === 'connected'), to: '/call-servers', manage: can('call_servers:manage'), detail: `${data.servers.length} servers` },
-    { label: 'A process with caller assignments', done: data.processes.some((p) => p.callerAssignmentCount > 0), to: canImport ? '/caller-import' : '/processes', manage: canImport || can('processes:manage'), detail: `${data.processes.length} processes` },
+    { label: 'An active call server with its SIP address (IP or host)', done: data.servers.some((s) => s.status === 'active' && !!s.host), to: '/call-servers', manage: can('call_servers:manage'), detail: `${data.servers.length} servers` },
+    { label: 'SIP accounts for your agents', done: (data.accounts ?? 0) > 0, to: '/call-servers', manage: can('call_servers:manage'), detail: data.accounts === null ? 'Visible to administrators' : `${data.accounts} accounts` },
+    { label: 'A process with caller assignments (prefix per call server)', done: data.processes.some((p) => p.callerAssignmentCount > 0), to: canImport ? '/caller-import' : '/processes', manage: canImport || can('processes:manage'), detail: `${data.processes.length} processes` },
   ];
   const ready = items.every((i) => i.done);
   return (
     <Card title="Calling setup" className="stack">
-      {ready ? <Alert tone="success">Setup is complete: calls can be placed from the Dialer.</Alert> : <p className="hint" style={{ margin: 0 }}>Calls need all four items below. Imported records start as Pending until you configure and verify them.</p>}
+      {ready ? <Alert tone="success">Setup is complete: agents can register their Softphone and dial.</Alert> : <p className="hint" style={{ margin: 0 }}>Agents need the three items below. Providers and DIDs from the Excel import are kept for records but are not used to route calls.</p>}
       <div className="table-wrap"><table><tbody>
         {items.map((i) => (
           <tr key={i.label}>
@@ -74,20 +73,19 @@ function SetupCard({ canImport }: { canImport: boolean }) {
 
 function MyCallsCard() {
   const { can } = useAuth();
-  const [calls, setCalls] = useState<CallView[] | null>(null);
+  const [calls, setCalls] = useState<SoftphoneCallView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    api.get<Paged<CallView>>('/dialer/calls?limit=5').then((r) => setCalls(r.items)).catch((e) => setError(errText(e, 'Failed to load calls')));
+    api.get<{ items: SoftphoneCallView[] }>('/softphone/calls?limit=5').then((r) => setCalls(r.items)).catch((e) => setError(errText(e, 'Failed to load calls')));
   }, []);
   return (
     <Card title={can('calls:read_all') ? 'Latest calls' : 'My recent calls'} className="stack">
-      <div><Link to="/dialer"><Button>Open dialer</Button></Link></div>
+      <div><Link to="/softphone"><Button>Open softphone</Button></Link></div>
       {error ? <Alert>{error}</Alert> : (
         <DataTable rows={calls} rowKey={(c) => c.id} empty="No calls yet."
           columns={[
             { key: 't', header: 'Started', render: (c) => new Date(c.startedAt).toLocaleString() },
-            { key: 'd', header: 'Destination', render: (c) => c.destination },
-            { key: 'r', header: 'Process', render: (c) => c.route.process },
+            { key: 'd', header: 'Dialled', render: (c) => c.dialed },
             { key: 's', header: 'Status', render: (c) => <Badge tone={statusTone(c.status === 'completed' ? 'active' : c.status)}>{c.status}</Badge> },
           ]} />
       )}

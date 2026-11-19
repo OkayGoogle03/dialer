@@ -128,17 +128,26 @@ describe('Master data: providers, trunks, DIDs, processes, call servers, assignm
     expect(await put(t.http, a, `/dids/${did.id}`, { serviceProviderId: p2.id })).toMatchObject({ verificationStatus: 'pending', status: 'pending_verification' });
   });
 
-  it('call servers: secrets protected; "connected" only after a real ARI check; activation requires it', async () => {
+  it('call servers: secrets protected; ARI "connected" only after a real check; activation needs only a SIP address; IP changes never deactivate', async () => {
     const s = await post(t.http, a, '/call-servers', { name: 'AST-OK', ariUrl: infra.ari.url, ariUsername: ARI_CREDS.username, ariPassword: ARI_CREDS.password });
     expect(s).toMatchObject({ status: 'pending_configuration', connectionStatus: 'unknown', hasPassword: true });
     expect(JSON.stringify(s)).not.toContain(ARI_CREDS.password);
-    expect((await t.http.put(`/api/v1/call-servers/${s.id}`).set(bearer(a)).send({ status: 'active' }).expect(400)).body.error.message).toMatch(/connectivity test/);
+    expect(s).toMatchObject({ sipTransport: 'wss', sipWsPath: '/ws', webrtcUrl: null, addressUpdatedAt: null });
+    expect((await t.http.put(`/api/v1/call-servers/${s.id}`).set(bearer(a)).send({ status: 'active' }).expect(400)).body.error.message).toMatch(/SIP address/);
     const ok = await post(t.http, a, `/call-servers/${s.id}/test`, {}, 200);
     expect(ok).toMatchObject({ ok: true, server: { connectionStatus: 'connected' } });
     expect(infra.ari.requests.some((r) => r.url.startsWith('/ari/asterisk/info'))).toBe(true);
-    expect((await put(t.http, a, `/call-servers/${s.id}`, { status: 'active' })).status).toBe('active');
-    // credential change resets connection state and deactivates
-    expect(await put(t.http, a, `/call-servers/${s.id}`, { ariPassword: 'another-password-9' })).toMatchObject({ connectionStatus: 'unknown', status: 'pending_configuration' });
+    const withIp = await put(t.http, a, `/call-servers/${s.id}`, { host: '10.1.2.3', port: 8089, status: 'active' });
+    expect(withIp).toMatchObject({ status: 'active', webrtcUrl: 'wss://10.1.2.3:8089/ws' });
+    expect(withIp.addressUpdatedAt).toEqual(expect.any(String));
+    // dynamic IP: changing the address updates the URL and timestamp but keeps the server active
+    const moved = await put(t.http, a, `/call-servers/${s.id}`, { host: '10.9.9.9' });
+    expect(moved).toMatchObject({ status: 'active', webrtcUrl: 'wss://10.9.9.9:8089/ws' });
+    expect(new Date(moved.addressUpdatedAt).getTime()).toBeGreaterThanOrEqual(new Date(withIp.addressUpdatedAt).getTime());
+    await put(t.http, a, `/call-servers/${s.id}`, { sipWsPath: 'nope' }, 400);
+    await put(t.http, a, `/call-servers/${s.id}`, { sipTransport: 'smtp' }, 400);
+    // ARI credential change resets only the connectivity result
+    expect(await put(t.http, a, `/call-servers/${s.id}`, { ariPassword: 'another-password-9' })).toMatchObject({ connectionStatus: 'unknown', status: 'active' });
     const c = await ownerConnection();
     const [rows] = await c.query(`SELECT ari_secret_encrypted FROM call_servers WHERE id = ?`, [s.id]);
     await c.end();

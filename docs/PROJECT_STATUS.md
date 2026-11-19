@@ -67,3 +67,23 @@ API 142/142 passed (13 suites). Packages: validation 4, event-schemas 4. Web: 5.
 4. Concurrency: a crashed worker's `initiated` reservation stops counting after 120 s; `ringing`/`answered` rows only clear on hangup (reconciliation arrives with Phase 2 call events).
 5. Still open from Phase 1: NATS JetStream never run against a real server (no Docker); CI workflow never executed; Platform/Roles/Teams screens not browser-tested.
 6. One browser upload returned a 500 from the dev proxy while the dev API was restarting; an identical retry succeeded and curl uploads (direct and proxied) succeeded. Not reproduced.
+
+## Softphone pivot - calls via the call server, not trunks (2026-11-19)
+Requirement: calls go through the **call server (PBX), whose IP is dynamic**. The admin registers the call server (address + SIP ID per agent); the agent's softphone registers with it like X-Lite; the agent dials manually and the process prefix is applied. Decisions D-038 .. D-043.
+
+### Implemented
+| Area | Status |
+|---|---|
+| Migration 0007 | `call_servers` gains `sip_transport`, `sip_ws_path`, `sip_realm`, `address_updated_at`; new `softphone_accounts` (encrypted per-agent SIP secret, composite FKs). Applied to dev_dialer and dev_dialer_test |
+| Call server API | SIP address fields + derived `webrtcUrl`; address change stamps `addressUpdatedAt` and does **not** deactivate; activation needs only an address; ARI check optional |
+| Softphone API | Admin SIP-account CRUD (password write-only); agent `config` (own account only, no-store, audited), registration report, server-side prefix dialing + `call_sessions` + outbox events, validated status transitions, own call history |
+| Web | New **Softphone** page (JsSIP/WebRTC: register, dial pad, "dial using" process/prefix, call/hang up/mute/DTMF, incoming answer/reject, recent calls); Call Servers page with SIP address fields and a **SIP accounts** panel; dashboard checklist/links updated; `/dialer` redirects to `/softphone`; old trunk-routing UI removed (API kept) |
+| Dynamic IP | Softphone refetches config at login, on focus/online, every 5 min and every 30 s while unregistered; restarts registration only if address/credentials changed and never during a call |
+
+### Not verified / limitations (read before relying on this)
+1. **No real PBX was available.** Backend behaviour is tested on TiDB; the browser path was exercised in a real browser against a local fake WebSocket SIP responder (accepts any REGISTER, rings, answers INVITE with 486): registration, the INVITE target `sip:919876543210@pbx.local` (typed 9876543210 + prefix 91), the failed-call log (486 recorded), and an address change by the admin (port 8089 -> 8088) picked up on focus without a reload. The browser pane blocks the microphone, so `getUserMedia` was stubbed with a synthetic tone for that run. **Real Asterisk/WebRTC (DTLS-SRTP, ICE, audio) is untested.** The PBX must expose WSS with a valid certificate and WebRTC-enabled endpoints.
+2. Call status is reported by the browser; until PBX call events are wired (Phase 2) a closed tab can leave a call `initiated`/`ringing`.
+3. UDP/TCP/TLS SIP is not possible in a browser; it needs the Windows desktop app (**not started**).
+4. The agent's SIP password reaches their browser by design (D-041). Use a low-privilege extension per agent on the PBX.
+5. The dashboard "last 24 hours" card still reads the old trunk-routing statistics and therefore does not count softphone calls.
+6. Provider/DID/trunk data and the Excel columns are retained but ignored for routing.

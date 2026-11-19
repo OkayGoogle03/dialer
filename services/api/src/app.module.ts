@@ -37,6 +37,7 @@ import { DialerController } from './routing/dialer.controller';
 import { DialerService } from './routing/dialer.service';
 import { CallerImportController } from './caller-import/caller-import.controller';
 import { CallerImportService } from './caller-import/caller-import.service';
+import { SoftphoneController, SoftphoneService } from './softphone/softphone';
 
 export interface AppDeps {
   config: AppConfig;
@@ -89,7 +90,7 @@ export function createAppModule(d: AppDeps): DynamicModule {
       ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }]),
     ],
     controllers: [HealthController, AuthController, UsersController, TenantsController, RolesController, TeamsController, PlatformController,
-      ProvidersController, TrunksController, DidsController, ProcessesController, CallServersController, AssignmentsController, CallerImportController, DialerController],
+      ProvidersController, TrunksController, DidsController, ProcessesController, CallServersController, AssignmentsController, CallerImportController, DialerController, SoftphoneController],
     providers: [
       AuditService,
       OutboxService,
@@ -101,7 +102,7 @@ export function createAppModule(d: AppDeps): DynamicModule {
       PlatformService,
       PlatformAdminGuard,
       SecretsService, ConnectivityService,
-      ProvidersService, TrunksService, DidsService, ProcessesService, CallServersService, AssignmentsService, CallerImportService, DialerService,
+      ProvidersService, TrunksService, DidsService, ProcessesService, CallServersService, AssignmentsService, CallerImportService, DialerService, SoftphoneService,
       { provide: TelephonyAdapter, useFactory: (c: ConnectivityService) => d.telephony ?? new AriTelephonyAdapter(c), inject: [ConnectivityService] },
       { provide: APP_GUARD, useClass: ThrottlerGuard },
       { provide: APP_GUARD, useClass: AuthGuard },

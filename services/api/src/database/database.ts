@@ -29,7 +29,7 @@ export const TENANT_TABLES = new Set([
   'ai_agents', 'ai_tools', 'ai_agent_tools', 'ai_sessions', 'ai_transcripts', 'subscriptions', 'usage_records',
   'invoices', 'outbox_events', 'idempotency_keys', 'service_providers', 'call_servers', 'provider_dids',
   'outbound_processes', 'process_provider_assignments', 'process_did_assignments', 'process_server_assignments',
-  'caller_import_batches', 'caller_import_records', 'caller_assignments', 'outbound_calls',
+  'caller_import_batches', 'caller_import_records', 'caller_assignments', 'outbound_calls', 'softphone_accounts',
 ]);
 /** Shared catalogue tables readable without tenant scope. */
 export const GLOBAL_TABLES = new Set(['permissions', 'plans', 'sip_providers']);

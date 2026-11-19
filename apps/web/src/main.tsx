@@ -17,7 +17,7 @@ import { DidsPage } from './pages/DidsPage';
 import { ProcessesPage } from './pages/ProcessesPage';
 import { CallServersPage } from './pages/CallServersPage';
 import { CallerImportPage } from './pages/CallerImportPage';
-import { DialerPage } from './pages/DialerPage';
+import { SoftphonePage } from './pages/SoftphonePage';
 import '@dialer/ui/styles.css';
 
 function RequireAuth({ children, perm }: { children: ReactNode; perm?: string }) {
@@ -59,7 +59,8 @@ createRoot(document.getElementById('root')!).render(
             <Route path="processes" element={<RequireAuth perm="master_data:read"><ProcessesPage /></RequireAuth>} />
             <Route path="call-servers" element={<RequireAuth perm="master_data:read"><CallServersPage /></RequireAuth>} />
             <Route path="caller-import" element={<RequireAuth perm="caller_import:manage"><CallerImportPage /></RequireAuth>} />
-            <Route path="dialer" element={<RequireAuth perm="calls:make"><DialerPage /></RequireAuth>} />
+            <Route path="softphone" element={<RequireAuth perm="calls:make"><SoftphonePage /></RequireAuth>} />
+            <Route path="dialer" element={<Navigate to="/softphone" replace />} />
             <Route path="settings/branding" element={<RequireAuth perm="branding:manage"><BrandingPage /></RequireAuth>} />
             </Route>
           </Route>

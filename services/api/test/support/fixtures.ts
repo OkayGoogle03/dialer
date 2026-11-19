@@ -43,7 +43,7 @@ export async function activateProvider(http: Http, tok: string, infra: Infra, na
 }
 
 export async function activateServer(http: Http, tok: string, infra: Infra, name: string, maxCalls = 100) {
-  const s = await post(http, tok, '/call-servers', { name, ariUrl: infra.ari.url, ariUsername: ARI_CREDS.username, ariPassword: ARI_CREDS.password, maxConcurrentCalls: maxCalls });
+  const s = await post(http, tok, '/call-servers', { name, host: '127.0.0.1', ariUrl: infra.ari.url, ariUsername: ARI_CREDS.username, ariPassword: ARI_CREDS.password, maxConcurrentCalls: maxCalls });
   const t = await post(http, tok, `/call-servers/${s.id}/test`, {}, 200);
   expect(t.ok).toBe(true);
   await put(http, tok, `/call-servers/${s.id}`, { status: 'active' });
