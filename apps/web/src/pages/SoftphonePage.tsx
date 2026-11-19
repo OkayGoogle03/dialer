@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Alert, Badge, Button, Card, DataTable, PageHeader, SelectField, TextField } from '@dialer/ui';
 import { api } from '../api/client';
@@ -137,7 +137,21 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
   const [msg, setMsg] = useState<string | null>(null);
   const { data, error } = useListItems(listId, kick);
 
-  useEffect(() => { api.get<{ items: CallListSummary[] }>('/call-lists').then((r) => { setLists(r.items); setListId((c) => c ?? r.items[0]?.id ?? null); }).catch(() => undefined); }, []);
+  // Lists are re-read every few seconds and on focus, so a list an admin uploaded later shows up without reloading the page.
+  // When the selected list has nothing left to dial and a newer list has pending rows, switch to it (this is what Auto-dial needs on a second run).
+  const listIdRef = useRef<string | null>(null);
+  listIdRef.current = listId;
+  useEffect(() => {
+    const load = () => api.get<{ items: CallListSummary[] }>('/call-lists').then((r) => {
+      setLists(r.items);
+      const cur = r.items.find((l) => l.id === listIdRef.current);
+      if (!cur || !(cur.counts.pending > 0)) setListId(r.items.find((l) => l.counts.pending > 0)?.id ?? cur?.id ?? r.items[0]?.id ?? null);
+    }).catch(() => undefined);
+    void load();
+    const t = setInterval(() => void load(), 8000);
+    window.addEventListener('focus', load);
+    return () => { clearInterval(t); window.removeEventListener('focus', load); };
+  }, []);
   const idle = sp.call.state === 'idle';
   // every call state change refreshes the rows at once; the 2 s poll covers server-side changes
   useEffect(() => { setKick((k) => k + 1); }, [sp.call.state]);
