@@ -18,6 +18,8 @@ import { DEFAULT_DIAL_PLAN } from '../master-data/processes';
 import { SoftphoneService } from '../softphone/softphone';
 
 export const LIST_HEADERS = ['Call Server IP', 'SIP ID', 'SIP ID Password', 'Prefix', 'Phone Number'] as const;
+/** Optional sixth column (older five-column files are still accepted). */
+export const PROCESS_HEADER = 'Process Name';
 const MAX_ROWS = 2000;
 const SIP_ID_RE = /^[A-Za-z0-9._@+-]{1,64}$/;
 const PREFIX_RE = /^[0-9]{0,6}$/;
@@ -32,16 +34,16 @@ const safe = (v: string | null) => (v && /^[=@+-]/.test(v) && !/^\+?[0-9]+$/.tes
 /** Standard port per transport: SIP 5060 (udp/tcp), WebSocket 8089 (wss) / 8088 (ws). */
 const defaultPort = (t: string) => (t === 'udp' || t === 'tcp' ? 5060 : t === 'ws' ? 8088 : 8089);
 
-interface Parsed { row: number; host: string; sipId: string; password: string; prefix: string; phone: string; error?: string }
+interface Parsed { processName: string; row: number; host: string; sipId: string; password: string; prefix: string; phone: string; error?: string }
 
 export async function buildListTemplate(): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Calls');
-  ws.addRow([...LIST_HEADERS]);
+  ws.addRow([...LIST_HEADERS, PROCESS_HEADER]);
   ws.getRow(1).font = { bold: true };
-  ws.columns = [{ width: 22 }, { width: 14 }, { width: 22 }, { width: 10 }, { width: 18 }];
+  ws.columns = [{ width: 22 }, { width: 14 }, { width: 22 }, { width: 10 }, { width: 18 }, { width: 24 }];
   ws.views = [{ state: 'frozen', ySplit: 1 }];
-  for (const c of [1, 2, 3, 4, 5]) ws.getColumn(c).numFmt = '@';
+  for (const c of [1, 2, 3, 4, 5, 6]) ws.getColumn(c).numFmt = '@';
   const info = wb.addWorksheet('Instructions');
   [
     'One row per call. Keep the five headers exactly as they are.',
@@ -49,7 +51,8 @@ export async function buildListTemplate(): Promise<Buffer> {
     'SIP ID / SIP ID Password: the agent\'s SIP login on that call server (stored encrypted; never exported).',
     'Prefix: digits added in front of the phone number (0-6 digits, may be empty). +international numbers are dialled as they are.',
     'Phone Number: digits, optionally starting with +.',
-    'Example row: 10.0.0.5 | 1001 | secret123 | 91 | 9876543210',
+    'Process Name (optional): the outbound process / campaign this call belongs to (up to 100 characters). Shown on every row and in the exported results.',
+    'Example row: 10.0.0.5 | 1001 | secret123 | 91 | 9876543210 | Sales Outbound',
   ].forEach((t) => info.addRow([t]));
   info.getColumn(1).width = 120;
   return Buffer.from(await wb.xlsx.writeBuffer());
@@ -62,14 +65,15 @@ async function parseList(buf: Buffer): Promise<Parsed[]> {
   const ws = wb.worksheets[0];
   if (!ws) throw new ImportFileError('EMPTY_FILE', 'The workbook has no worksheets.');
   const bad = LIST_HEADERS.filter((h, i) => cellText(ws.getRow(1).getCell(i + 1).value).text !== h);
-  if (bad.length) throw new ImportFileError('INVALID_HEADERS', `Invalid headers. The first row must be exactly: ${LIST_HEADERS.join(' | ')}.`);
+  const sixth = cellText(ws.getRow(1).getCell(6).value).text;
+  if (bad.length || (sixth !== '' && sixth !== PROCESS_HEADER)) throw new ImportFileError('INVALID_HEADERS', `Invalid headers. The first row must be exactly: ${[...LIST_HEADERS, PROCESS_HEADER].join(' | ')} (Process Name is optional).`);
   const out: Parsed[] = [];
   for (let r = 2; r <= Math.min(ws.rowCount, 100_000); r++) {
-    const cells = [1, 2, 3, 4, 5].map((c) => cellText(ws.getRow(r).getCell(c).value));
+    const cells = [1, 2, 3, 4, 5, 6].map((c) => cellText(ws.getRow(r).getCell(c).value));
     if (cells.every((c) => c.text === '' && !c.error)) continue;
     if (out.length >= MAX_ROWS) throw new ImportFileError('TOO_MANY_ROWS', `More than ${MAX_ROWS} rows. Split the file.`);
-    const [host, sipId, password, prefix, phone] = cells.map((c) => c.text);
-    const item: Parsed = { row: r, host, sipId, password, prefix, phone: phone.replace(/[\s().-]/g, '') };
+    const [host, sipId, password, prefix, phone, processName] = cells.map((c) => c.text);
+    const item: Parsed = { row: r, host, sipId, password, prefix, phone: phone.replace(/[\s().-]/g, ''), processName: processName.slice(0, 200) };
     const cellErr = cells.find((c) => c.error)?.error;
     if (cellErr) item.error = cellErr;
     else if (!HOST_RE.test(host)) item.error = 'Call Server IP is missing or invalid';
@@ -77,6 +81,7 @@ async function parseList(buf: Buffer): Promise<Parsed[]> {
     else if (!password || password.length > 200) item.error = 'SIP ID Password is missing';
     else if (!PREFIX_RE.test(prefix)) item.error = 'Prefix must be 0-6 digits';
     else if (!PHONE_RE.test(item.phone)) item.error = 'Phone Number must be 3-20 digits, optionally starting with +';
+    else if (processName.length > 100) item.error = 'Process Name is longer than 100 characters';
     out.push(item);
   }
   if (!out.length) throw new ImportFileError('EMPTY_FILE', 'The file has no data rows.');
@@ -136,10 +141,10 @@ export class CallListsService {
         const p: Record<string, unknown> = { lid: listId };
         const values = chunk.map((r, j) => {
           const srv = servers.get(r.host.toLowerCase());
-          Object.assign(p, { [`i${j}`]: newId(), [`n${j}`]: r.row, [`s${j}`]: srv?.id ?? null, [`h${j}`]: r.host.slice(0, 253), [`d${j}`]: r.sipId.slice(0, 64), [`x${j}`]: r.prefix, [`p${j}`]: r.phone.slice(0, 40), [`st${j}`]: r.error ? 'invalid' : 'pending', [`r${j}`]: r.error ?? null });
-          return `(:i${j}, :tenantId, :lid, :n${j}, :s${j}, :h${j}, :d${j}, :x${j}, :p${j}, :st${j}, :r${j})`;
+          Object.assign(p, { [`i${j}`]: newId(), [`n${j}`]: r.row, [`s${j}`]: srv?.id ?? null, [`h${j}`]: r.host.slice(0, 253), [`d${j}`]: r.sipId.slice(0, 64), [`x${j}`]: r.prefix, [`p${j}`]: r.phone.slice(0, 40), [`pn${j}`]: r.processName || null, [`st${j}`]: r.error ? 'invalid' : 'pending', [`r${j}`]: r.error ?? null });
+          return `(:i${j}, :tenantId, :lid, :n${j}, :s${j}, :h${j}, :d${j}, :x${j}, :p${j}, :pn${j}, :st${j}, :r${j})`;
         });
-        await tx.execute(`INSERT INTO call_list_items (id, tenant_id, list_id, row_no, call_server_id, server_host, sip_id, prefix, phone, status, result) VALUES ${values.join(', ')}`, p);
+        await tx.execute(`INSERT INTO call_list_items (id, tenant_id, list_id, row_no, call_server_id, server_host, sip_id, prefix, phone, process_name, status, result) VALUES ${values.join(', ')}`, p);
       }
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_list.imported', entityType: 'call_list', entityId: listId, metadata: { rows: rows.length, invalid, createdServers, agent: target } }, ctx);
       return {
@@ -232,16 +237,16 @@ export class CallListsService {
     }));
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Call results');
-    const headers = ['Row', 'Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Dialed Number', 'Status', 'Result / Reason', 'SIP Code', 'Attempts', 'Called At (UTC)', 'Answered At (UTC)', 'Ended At (UTC)', 'Duration (s)'];
+    const headers = ['Row', 'Process Name', 'Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Dialed Number', 'Status', 'Result / Reason', 'SIP Code', 'Attempts', 'Called At (UTC)', 'Answered At (UTC)', 'Ended At (UTC)', 'Duration (s)'];
     ws.addRow(headers);
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
     ws.columns = headers.map((h) => ({ width: Math.max(12, h.length + 2) }));
     for (const r of rows) {
-      ws.addRow([r.row_no, safe(r.server_host), safe(r.sip_id), safe(r.prefix), safe(r.phone), safe(r.dialed), STATUS_LABEL[r.status] ?? r.status, safe(r.result), r.sip_code ?? '', r.attempts,
+      ws.addRow([r.row_no, safe(r.process_name), safe(r.server_host), safe(r.sip_id), safe(r.prefix), safe(r.phone), safe(r.dialed), STATUS_LABEL[r.status] ?? r.status, safe(r.result), r.sip_code ?? '', r.attempts,
         r.called_at ? new Date(r.called_at).toISOString() : '', r.answered_at ? new Date(r.answered_at).toISOString() : '', r.ended_at ? new Date(r.ended_at).toISOString() : '', r.duration_seconds ?? '']);
     }
-    for (const c of [2, 3, 4, 5, 6]) ws.getColumn(c).numFmt = '@';
+    for (const c of [2, 3, 4, 5, 6, 7]) ws.getColumn(c).numFmt = '@';
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename: `${list.name.replace(/[^A-Za-z0-9._-]+/g, '_')}_results.xlsx` };
   }
 
@@ -256,7 +261,7 @@ const STATUS_LABEL: Record<string, string> = { pending: 'Pending', calling: 'Cal
 
 
 const itemView = (r: Row) => ({
-  id: r.id, row: r.row_no, serverHost: r.server_host, sipId: r.sip_id, prefix: r.prefix, phone: r.phone, dialed: r.dialed, status: r.status, result: r.result, sipCode: r.sip_code,
+  id: r.id, row: r.row_no, processName: r.process_name, serverHost: r.server_host, sipId: r.sip_id, prefix: r.prefix, phone: r.phone, dialed: r.dialed, status: r.status, result: r.result, sipCode: r.sip_code,
   attempts: r.attempts, calledAt: iso(r.called_at), answeredAt: iso(r.answered_at), endedAt: iso(r.ended_at), durationSeconds: r.duration_seconds,
 });
 

@@ -17,7 +17,7 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
   let ag2: string;
   let ag1Id: string;
   let listId: string;
-  let items: { id: string; row: number; status: string; phone: string }[];
+  let items: { id: string; row: number; status: string; phone: string; processName: string | null }[];
 
   const upload = (tok: string, buf: Buffer, qs = '') =>
     t.http.post(`/api/v1/call-lists/import${qs}`).set(bearer(tok)).set('X-Forwarded-For', nextIp()).attach('file', buf, { filename: 'calls.xlsx', contentType: XLSX });
@@ -41,23 +41,27 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     const tpl = await t.http.get('/api/v1/call-lists/template').set(bearer(a)).buffer(true).parse((res, cb) => { const c: Buffer[] = []; res.on('data', (d: Buffer) => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); }).expect(200);
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(tpl.body as ExcelJS.Buffer);
-    expect((wb.worksheets[0].getRow(1).values as string[]).slice(1)).toEqual([...LIST_HEADERS]);
+    expect((wb.worksheets[0].getRow(1).values as string[]).slice(1)).toEqual([...LIST_HEADERS, 'Process Name']);
     const wrong = await makeWorkbook([['1', '2', '3', '4', '5']], ['Server', 'SIP', 'Pass', 'Prefix', 'Phone']);
     expect((await upload(a, wrong).expect(400)).body.error.message).toMatch(/headers/i);
     await upload(a, Buffer.from('not an excel file')).expect(400);
     await upload(a, await makeWorkbook([], LIST_HEADERS)).expect(400);
+    // an old five-column file is still accepted by the header check (it fails only because it has no rows)
+    expect((await upload(a, await makeWorkbook([], LIST_HEADERS)).expect(400)).body.error.message).toMatch(/no data rows/);
+    const sixth = await makeWorkbook([], [...LIST_HEADERS, 'Wrong']);
+    expect((await upload(a, sixth).expect(400)).body.error.message).toMatch(/headers/i);
   });
 
   it('only managers import; the import creates the call server and the agent\'s SIP account and keeps bad rows with reasons', async () => {
     const rows = [
-      ['10.20.30.40', '2001', 'excel-sip-secret-1', '91', '9876543210'],
+      ['10.20.30.40', '2001', 'excel-sip-secret-1', '91', '9876543210', 'Sales Outbound'],
       ['10.20.30.40', '2001', 'excel-sip-secret-1', '91', '+14155550100'],
       ['10.20.30.40', '2002', 'other-secret', '91', '9876543211'], // second SIP ID for the same agent+server
       ['10.20.30.40', '2001', 'excel-sip-secret-1', '91', 'abc'],  // bad phone
       ['not a host!', '2001', 'x', '91', '9876543212'],            // bad IP
     ];
-    await upload(ag1, await makeWorkbook(rows, LIST_HEADERS), `?userId=${ag1Id}`).expect(403);
-    const res = (await upload(a, await makeWorkbook(rows, LIST_HEADERS), `?userId=${ag1Id}&name=Morning%20batch`).expect(201)).body;
+    await upload(ag1, await makeWorkbook(rows, [...LIST_HEADERS, 'Process Name']), `?userId=${ag1Id}`).expect(403);
+    const res = (await upload(a, await makeWorkbook(rows, [...LIST_HEADERS, 'Process Name']), `?userId=${ag1Id}&name=Morning%20batch`).expect(201)).body;
     expect(res).toMatchObject({ total: 5, valid: 2, invalid: 3, createdServers: 1 });
     expect(res.errors.map((e: { message: string }) => e.message).join('|')).toMatch(/already uses SIP ID 2001/);
     listId = res.id;
@@ -89,6 +93,8 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     await t.http.get(`/api/v1/call-lists/${listId}/export`).set(bearer(b)).expect(404);
     const body = await getItems(ag1);
     items = body.items;
+    expect(items.find((i: { phone: string }) => i.phone === '9876543210')).toMatchObject({ processName: 'Sales Outbound' });
+    expect(items.find((i: { phone: string }) => i.phone === '+14155550100')?.processName ?? null).toBeNull();
     expect(body.counts).toEqual({ pending: 2, invalid: 3 });
   });
 
@@ -124,11 +130,12 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     await wb.xlsx.load(res.body as ExcelJS.Buffer);
     const ws = wb.worksheets[0];
     const head = (ws.getRow(1).values as string[]).slice(1);
-    expect(head).toEqual(expect.arrayContaining(['Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Status', 'Result / Reason', 'Duration (s)']));
+    expect(head).toEqual(expect.arrayContaining(['Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Process Name', 'Status', 'Result / Reason', 'Duration (s)']));
     expect(ws.rowCount).toBe(6);
     const text = JSON.stringify(ws.getSheetValues());
     expect(text).not.toContain('excel-sip-secret-1');
     expect(text).toContain('Completed');
+    expect(text).toContain('Sales Outbound');
     expect(text).toContain('Invalid row');
     expect(text).toContain('Phone Number must be');
   });

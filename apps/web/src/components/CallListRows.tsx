@@ -34,6 +34,7 @@ export function CallListRows({ items, error, action }: { items: CallListItem[] |
       <DataTable rows={items} rowKey={(i) => i.id} empty="No rows."
         columns={[
           { key: 'r', header: '#', render: (i) => i.row },
+          { key: 'pn', header: 'Process', render: (i) => i.processName ?? '—' },
           { key: 'p', header: 'Phone', render: (i) => <>{i.phone}<div className="hint">{i.dialed ? `dialled ${i.dialed}` : i.prefix ? `prefix ${i.prefix}` : ''}</div></> },
           { key: 's', header: 'Server / SIP ID', render: (i) => <>{i.serverHost}<div className="hint">{i.sipId}</div></> },
           { key: 'st', header: 'Status', render: (i) => <>{statusBadge(i.status)}{i.result && <div className="hint">{i.result}{i.sipCode ? ` (${i.sipCode})` : ''}</div>}{i.durationSeconds != null && i.status === 'completed' && <div className="hint">{i.durationSeconds}s</div>}</> },

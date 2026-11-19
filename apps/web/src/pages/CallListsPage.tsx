@@ -40,7 +40,7 @@ export function CallListsPage() {
     <>
       <PageHeader title="Call Lists" />
       <Notice>
-        Upload an Excel with <strong>Call Server IP, SIP ID, SIP ID Password, Prefix, Phone Number</strong>. The call server (by IP) and the agent's SIP account are created or updated automatically, and each row becomes a call the agent dials from the Softphone with the prefix applied. Results update live and can be exported to Excel.
+        Upload an Excel with <strong>Call Server IP, SIP ID, SIP ID Password, Prefix, Phone Number</strong> and optionally <strong>Process Name</strong>. The call server (by IP) and the agent's SIP account are created or updated automatically, and each row becomes a call the agent dials from the Softphone with the prefix applied. Results update live and can be exported to Excel.
       </Notice>
       {error && <Alert>{error}</Alert>}
       <Card title="Upload" className="stack">
