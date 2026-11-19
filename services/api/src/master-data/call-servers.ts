@@ -138,11 +138,14 @@ export class CallServersService {
   remove(actor: AuthUser, id: string, ctx: RequestContext) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const cur = await this.load(tx, id, true);
+      // Deleting a call server also removes its dial prefixes, process links and agents' SIP accounts on it.
       const [{ n }] = await tx.query<{ n: number }>(
-        `SELECT (SELECT COUNT(*) FROM caller_assignments WHERE tenant_id = :tenantId AND call_server_id = :id)
-              + (SELECT COUNT(*) FROM process_server_assignments WHERE tenant_id = :tenantId AND call_server_id = :id)
-              + (SELECT COUNT(*) FROM softphone_accounts WHERE tenant_id = :tenantId AND call_server_id = :id AND deleted_at IS NULL) AS n`, { id });
-      if (Number(n) > 0) throw new ConflictException(`Call server "${cur.name}" is assigned to a process or has SIP accounts`);
+        `SELECT COUNT(*) AS n FROM outbound_calls oc JOIN caller_assignments ca ON ca.id = oc.caller_assignment_id AND ca.tenant_id = :tenantId
+          WHERE oc.tenant_id = :tenantId AND ca.call_server_id = :id`, { id });
+      if (Number(n) > 0) throw new ConflictException(`Call server "${cur.name}" has call history from the old trunk dialer and cannot be deleted`);
+      await tx.execute(`DELETE FROM caller_assignments WHERE tenant_id = :tenantId AND call_server_id = :id`, { id });
+      await tx.execute(`DELETE FROM process_server_assignments WHERE tenant_id = :tenantId AND call_server_id = :id`, { id });
+      await tx.execute(`UPDATE softphone_accounts SET deleted_at = UTC_TIMESTAMP(3), status = 'disabled' WHERE tenant_id = :tenantId AND call_server_id = :id AND deleted_at IS NULL`, { id });
       await tx.execute(`UPDATE call_servers SET deleted_at = UTC_TIMESTAMP(3), status = 'disabled' WHERE tenant_id = :tenantId AND id = :id`, { id });
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_server.deleted', entityType: 'call_server', entityId: id, metadata: { name: cur.name } }, ctx);
     });

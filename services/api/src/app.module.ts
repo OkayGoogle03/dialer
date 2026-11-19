@@ -37,6 +37,7 @@ import { DialerController } from './routing/dialer.controller';
 import { DialerService } from './routing/dialer.service';
 import { CallerImportController } from './caller-import/caller-import.controller';
 import { CallerImportService } from './caller-import/caller-import.service';
+import { AppInfoController } from './app-info/app-info.controller';
 import { SoftphoneController, SoftphoneService } from './softphone/softphone';
 
 export interface AppDeps {
@@ -90,7 +91,7 @@ export function createAppModule(d: AppDeps): DynamicModule {
       ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }]),
     ],
     controllers: [HealthController, AuthController, UsersController, TenantsController, RolesController, TeamsController, PlatformController,
-      ProvidersController, TrunksController, DidsController, ProcessesController, CallServersController, AssignmentsController, CallerImportController, DialerController, SoftphoneController],
+      ProvidersController, TrunksController, DidsController, ProcessesController, CallServersController, AssignmentsController, CallerImportController, DialerController, SoftphoneController, AppInfoController],
     providers: [
       AuditService,
       OutboxService,

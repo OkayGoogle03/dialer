@@ -7,7 +7,9 @@
     "TENANT_STATUS_CACHE_SECONDS": "15",
     "DB_POOL_SIZE": "3",
     "DB_PORT": "4000",
-    "DB_TLS": "true"
+    "DB_TLS": "true",
+    "DESKTOP_DOWNLOAD_URL": "",
+    "DESKTOP_VERSION": "0.1.0"
   },
   "development": {
     "DB_HOST": "gateway01.ap-southeast-1.prod.aws.tidbcloud.com",

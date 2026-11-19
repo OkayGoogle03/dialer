@@ -21,6 +21,9 @@ export interface AppConfig {
   jwtAccessTtlSeconds: number;
   refreshTtlDays: number;
   corsOrigins: string[];
+  /** Where the Windows installer is hosted (non-secret, https). Empty = the Download page says it is not published yet. */
+  desktopDownloadUrl: string;
+  desktopVersion: string;
   natsUrl?: string;
   outboxRelayEnabled: boolean;
   /** Seconds a tenant status is cached by the auth guard (suspension propagation delay). */
@@ -69,6 +72,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jwtAccessTtlSeconds: int('JWT_ACCESS_TTL_SECONDS', env.JWT_ACCESS_TTL_SECONDS, 900, 60, 3600),
     refreshTtlDays: int('REFRESH_TTL_DAYS', env.REFRESH_TTL_DAYS, 30, 1, 90),
     corsOrigins: (env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    desktopDownloadUrl: /^https:\/\/\S+$/.test(env.DESKTOP_DOWNLOAD_URL ?? '') ? env.DESKTOP_DOWNLOAD_URL! : '',
+    desktopVersion: (env.DESKTOP_VERSION ?? '').slice(0, 20),
     natsUrl: env.NATS_URL || undefined,
     outboxRelayEnabled: env.OUTBOX_RELAY_ENABLED === 'true',
     tenantStatusCacheSeconds: int('TENANT_STATUS_CACHE_SECONDS', env.TENANT_STATUS_CACHE_SECONDS, 15, 0, 300),

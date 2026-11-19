@@ -34,7 +34,7 @@ export function ProcessesPage() {
             <div className="row">
               <Button size="small" variant="secondary" onClick={() => setOpen(open?.id === p.id ? null : p)}>{open?.id === p.id ? 'Close' : 'Prefixes'}</Button>
               {manage && <Button size="small" variant="secondary" onClick={() => setForm(p)}>Edit</Button>}
-              {manage && <Button size="small" variant="danger" onClick={async () => { if (!window.confirm(`Delete process "${p.name}"?`)) return; try { await api.delete(`/processes/${p.id}`); await reload(); } catch (e) { setError(errText(e, 'Delete failed')); } }}>Delete</Button>}
+              {manage && <Button size="small" variant="danger" onClick={async () => { if (!window.confirm(`Delete process "${p.name}"? Its dial prefixes are deleted too.`)) return; try { await api.delete(`/processes/${p.id}`); await reload(); } catch (e) { setError(errText(e, 'Delete failed')); } }}>Delete</Button>}
             </div>
           ) },
         ]} />

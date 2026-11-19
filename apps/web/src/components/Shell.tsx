@@ -11,6 +11,7 @@ const NAV: { to: string; label: string; perm?: string }[] = [
   { to: '/call-servers', label: 'Call Servers', perm: 'master_data:read' },
   { to: '/teams', label: 'Teams', perm: 'users:read' },
   { to: '/roles', label: 'Roles', perm: 'roles:manage' },
+  { to: '/download', label: 'Download App' },
   { to: '/settings/branding', label: 'Branding', perm: 'branding:manage' },
 ];
 

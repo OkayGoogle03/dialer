@@ -128,7 +128,12 @@ export class ProcessesService {
   remove(actor: AuthUser, id: string, ctx: RequestContext) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const cur = await this.load(tx, id, true);
-      if (cur.callerAssignmentCount > 0) throw new ConflictException(`Process "${cur.name}" has ${cur.callerAssignmentCount} caller assignments; remove them first`);
+      // Deleting a process removes its dial prefixes (caller assignments) with it.
+      const [{ n }] = await tx.query<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM outbound_calls oc JOIN caller_assignments ca ON ca.id = oc.caller_assignment_id AND ca.tenant_id = :tenantId
+          WHERE oc.tenant_id = :tenantId AND ca.process_id = :id`, { id });
+      if (Number(n) > 0) throw new ConflictException(`Process "${cur.name}" has call history from the old trunk dialer and cannot be deleted`);
+      await tx.execute(`DELETE FROM caller_assignments WHERE tenant_id = :tenantId AND process_id = :id`, { id });
       await tx.execute(`DELETE FROM process_provider_assignments WHERE tenant_id = :tenantId AND process_id = :id`, { id });
       await tx.execute(`DELETE FROM process_did_assignments WHERE tenant_id = :tenantId AND process_id = :id`, { id });
       await tx.execute(`DELETE FROM process_server_assignments WHERE tenant_id = :tenantId AND process_id = :id`, { id });

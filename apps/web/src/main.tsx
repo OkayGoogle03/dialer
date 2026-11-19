@@ -15,6 +15,7 @@ import { PlatformOverviewPage } from './pages/PlatformOverviewPage';
 import { ProcessesPage } from './pages/ProcessesPage';
 import { CallServersPage } from './pages/CallServersPage';
 import { CallerImportPage } from './pages/CallerImportPage';
+import { DownloadPage } from './pages/DownloadPage';
 import { SoftphonePage } from './pages/SoftphonePage';
 import '@dialer/ui/styles.css';
 
@@ -56,6 +57,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="call-servers" element={<RequireAuth perm="master_data:read"><CallServersPage /></RequireAuth>} />
             <Route path="caller-import" element={<RequireAuth perm="caller_import:manage"><CallerImportPage /></RequireAuth>} />
             <Route path="softphone" element={<RequireAuth perm="calls:make"><SoftphonePage /></RequireAuth>} />
+            <Route path="download" element={<DownloadPage />} />
             <Route path="dialer" element={<Navigate to="/softphone" replace />} />
             <Route path="settings/branding" element={<RequireAuth perm="branding:manage"><BrandingPage /></RequireAuth>} />
             </Route>

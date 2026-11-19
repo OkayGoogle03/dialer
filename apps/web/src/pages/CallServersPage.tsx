@@ -55,7 +55,7 @@ export function CallServersPage() {
               {s.status === 'active' ? <Button size="small" variant="secondary" onClick={() => act(() => api.put(`/call-servers/${s.id}`, { status: 'disabled' }))}>Disable</Button>
                 : <Button size="small" variant="secondary" onClick={() => act(() => api.put(`/call-servers/${s.id}`, { status: 'active' }))}>Activate</Button>}
               <Button size="small" variant="secondary" onClick={() => setForm(s)}>Edit</Button>
-              <Button size="small" variant="danger" onClick={() => window.confirm(`Delete call server "${s.name}"?`) && act(() => api.delete(`/call-servers/${s.id}`))}>Delete</Button>
+              <Button size="small" variant="danger" onClick={() => window.confirm(`Delete call server "${s.name}"? Its dial prefixes and the agents' SIP accounts on it are deleted too.`) && act(() => api.delete(`/call-servers/${s.id}`))}>Delete</Button>
             </div>
           ) },
         ]} />

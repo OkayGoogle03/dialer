@@ -64,6 +64,20 @@ export class UsersService {
     });
   }
 
+  /** Soft delete: the user can no longer sign in, their sessions and SIP accounts end, call history is kept, and the e-mail becomes reusable. */
+  async remove(actor: AuthUser, id: string, ctx: RequestContext) {
+    if (id === actor.userId) throw new BadRequestException('You cannot delete yourself');
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      const existing = await tx.query(`SELECT id FROM users WHERE tenant_id = :tenantId AND id = :id AND deleted_at IS NULL FOR UPDATE`, { id });
+      if (!existing.length) throw new NotFoundException('User not found');
+      assertSubset(actor, await userPermissions(tx, id), 'delete this user');
+      await tx.execute(`UPDATE users SET deleted_at = UTC_TIMESTAMP(3), status = 'disabled' WHERE tenant_id = :tenantId AND id = :id`, { id });
+      await tx.execute(`UPDATE refresh_tokens SET revoked_at = UTC_TIMESTAMP(3) WHERE tenant_id = :tenantId AND user_id = :id AND revoked_at IS NULL`, { id });
+      await tx.execute(`UPDATE softphone_accounts SET deleted_at = UTC_TIMESTAMP(3), status = 'disabled' WHERE tenant_id = :tenantId AND user_id = :id AND deleted_at IS NULL`, { id });
+      await this.audit.log(tx, { actorUserId: actor.userId, action: 'user.deleted', entityType: 'user', entityId: id }, ctx);
+    });
+  }
+
   async update(actor: AuthUser, id: string, dto: UpdateUserDto, ctx: RequestContext) {
     if (id === actor.userId && dto.status === 'disabled') throw new BadRequestException('You cannot disable yourself');
     return this.db.withTenant(actor.tenantId, async (tx) => {

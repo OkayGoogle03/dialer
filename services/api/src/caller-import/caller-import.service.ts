@@ -236,9 +236,10 @@ export class CallerImportService {
             WHERE oc.tenant_id = :tenantId AND ca.import_batch_id = :id`, { id });
         if (Number(n) > 0) throw new ConflictException('Calls have already been placed using this batch\'s assignments; it cannot be rolled back');
         const r = await tx.execute(`DELETE FROM caller_assignments WHERE tenant_id = :tenantId AND import_batch_id = :id`, { id });
-        await tx.execute(`UPDATE caller_import_batches SET status = 'rolled_back' WHERE tenant_id = :tenantId AND id = :id`, { id });
-        await this.audit.log(tx, { actorUserId: actor.userId, action: 'caller_import.rolled_back', entityType: 'caller_import_batch', entityId: id, metadata: { removedAssignments: r.affectedRows } }, ctx);
-        return { status: 'rolled_back', removedAssignments: r.affectedRows };
+        // The batch is removed together with its assignments (its records cascade); master data created by it stays.
+        await tx.execute(`DELETE FROM caller_import_batches WHERE tenant_id = :tenantId AND id = :id`, { id });
+        await this.audit.log(tx, { actorUserId: actor.userId, action: 'caller_import.deleted', entityType: 'caller_import_batch', entityId: id, metadata: { status: batch.status, removedAssignments: r.affectedRows } }, ctx);
+        return { status: 'deleted', removedAssignments: r.affectedRows };
       }
       await tx.execute(`DELETE FROM caller_import_batches WHERE tenant_id = :tenantId AND id = :id`, { id });
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'caller_import.deleted', entityType: 'caller_import_batch', entityId: id, metadata: { status: batch.status } }, ctx);

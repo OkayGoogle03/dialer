@@ -139,7 +139,6 @@ describe('Softphone: call server SIP address, per-agent SIP accounts, prefixed m
   });
 
   it('disabled accounts and inactive servers drop out of config; accounts block server deletion; password rotation applies', async () => {
-    await t.http.delete(`/api/v1/call-servers/${server.id}`).set(bearer(a)).expect(409);
     await put(t.http, a, `/softphone-accounts/${acct2.id}`, { status: 'disabled' });
     expect((await cfg(ag2).expect(200)).body.accounts).toHaveLength(0);
     await t.http.post('/api/v1/softphone/calls').set(bearer(ag2)).send({ accountId: acct2.id, destination: '2000' }).expect(404);
@@ -150,5 +149,27 @@ describe('Softphone: call server SIP address, per-agent SIP accounts, prefixed m
     expect((await cfg(ag1).expect(200)).body.accounts[0].password).toBe('rotated-agent-secret-5');
     await t.http.delete(`/api/v1/softphone-accounts/${acct.id}`).set(bearer(a)).expect(204);
     expect((await cfg(ag1).expect(200)).body.accounts).toHaveLength(0);
+  });
+
+  it('deleting a process or call server cascades to its prefixes and SIP accounts', async () => {
+    const procs = (await t.http.get('/api/v1/processes').set(bearer(a)).expect(200)).body.items;
+    expect(procs[0].callerAssignmentCount).toBeGreaterThan(0);
+    await t.http.delete(`/api/v1/processes/${procs[0].id}`).set(bearer(a)).expect(204);
+    expect((await t.http.get('/api/v1/processes').set(bearer(a)).expect(200)).body.total).toBe(0);
+    await put(t.http, a, `/softphone-accounts/${acct2.id}`, { status: 'active' });
+    await t.http.delete(`/api/v1/call-servers/${server.id}`).set(bearer(a)).expect(204);
+    expect((await t.http.get('/api/v1/call-servers').set(bearer(a)).expect(200)).body.total).toBe(0);
+    expect((await t.http.get('/api/v1/softphone-accounts').set(bearer(a)).expect(200)).body.items).toHaveLength(0);
+    expect((await cfg(ag2).expect(200)).body.accounts).toHaveLength(0);
+  });
+
+  it('deleting a user ends their access and SIP account; admins cannot delete themselves', async () => {
+    const u = (await t.http.get('/api/v1/users?limit=100').set(bearer(a)).expect(200)).body.items;
+    const me = u.find((x: { email: string }) => x.email === `admin@${A}.test`);
+    await t.http.delete(`/api/v1/users/${me.id}`).set(bearer(a)).expect(400);
+    await t.http.delete(`/api/v1/users/${ag2Id}`).set(bearer(a)).expect(204);
+    await t.http.delete(`/api/v1/users/${ag2Id}`).set(bearer(a)).expect(404);
+    await t.http.post('/api/v1/auth/login').send({ tenant: A, email: `ag2@${A}.test`, password: 'longenough123' }).set('X-Forwarded-For', '10.9.9.9').expect(401);
+    await t.http.delete(`/api/v1/users/${ag1Id}`).set(bearer(ag1)).expect(403);
   });
 });

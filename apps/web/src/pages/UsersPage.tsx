@@ -31,6 +31,11 @@ export function UsersPage() {
     }
   }
 
+  async function removeUser(u: UserView) {
+    if (!window.confirm(`Delete user ${u.email}? They can no longer sign in and their SIP accounts are removed. Call history is kept.`)) return;
+    try { await api.delete(`/users/${u.id}`); await load(); } catch (e) { setError(e instanceof ApiError ? e.message : 'Delete failed'); }
+  }
+
   return (
     <>
       <div className="topbar">
@@ -55,7 +60,7 @@ export function UsersPage() {
                 <td><span className={`badge ${u.status === 'active' ? 'ok' : 'off'}`}>{u.status}</span></td>
                 <td>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}</td>
                 {can('users:manage') && (
-                  <td>{u.id !== me?.user.id && <button className="btn secondary" onClick={() => toggleStatus(u)}>{u.status === 'active' ? 'Disable' : 'Enable'}</button>}</td>
+                  <td>{u.id !== me?.user.id && <button className="btn secondary" onClick={() => toggleStatus(u)}>{u.status === 'active' ? 'Disable' : 'Enable'}</button>} {u.id !== me?.user.id && <button className="btn secondary" onClick={() => removeUser(u)}>Delete</button>}</td>
                 )}
               </tr>
             ))}

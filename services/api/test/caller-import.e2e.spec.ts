@@ -245,13 +245,13 @@ describe('Caller Excel import (TiDB)', () => {
     expect(await assignmentCount(tenantA)).toBe(aBefore);
   });
 
-  it('deleting a batch rolls back its assignments (master data stays); unconfirmed batches are simply deleted', async () => {
+  it('deleting an imported batch removes it and its assignments (master data stays); unconfirmed batches are simply deleted', async () => {
     const { confirm } = await importRows(t.http, a, uniqueRows(`dl${RUN}`));
     const before = await assignmentCount(tenantA);
     const del = await t.http.delete(`/api/v1/caller-import/batches/${confirm.body.batch.id}`).set(bearer(a)).expect(200);
-    expect(del.body).toEqual({ status: 'rolled_back', removedAssignments: 4 });
+    expect(del.body).toEqual({ status: 'deleted', removedAssignments: 4 });
     expect(await assignmentCount(tenantA)).toBe(before - 4);
-    expect((await t.http.get(`/api/v1/caller-import/batches/${confirm.body.batch.id}`).set(bearer(a)).expect(200)).body.batch.status).toBe('rolled_back');
+    await t.http.get(`/api/v1/caller-import/batches/${confirm.body.batch.id}`).set(bearer(a)).expect(404);
     expect((await t.http.get(`/api/v1/providers?search=Tata-dl${RUN}`).set(bearer(a)).expect(200)).body.total).toBe(1);
     const pv = await upload(a, await makeWorkbook(uniqueRows(`dl2${RUN}`))).expect(200);
     expect((await t.http.delete(`/api/v1/caller-import/batches/${pv.body.batch.id}`).set(bearer(a)).expect(200)).body.status).toBe('deleted');

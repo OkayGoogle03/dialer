@@ -91,7 +91,7 @@ export function CallerImportPage() {
     try { const f = await api.download('GET', `/caller-import/batches/${id}/download-errors`); saveBlob(f.blob, f.filename); } catch (e) { setError(errText(e, 'Download failed')); }
   }
   async function removeBatch(b: BatchRow) {
-    if (!window.confirm(b.status === 'imported' ? 'Roll back this import? Its caller assignments are removed (master data stays).' : 'Delete this batch?')) return;
+    if (!window.confirm(b.status === 'imported' ? 'Delete this import? Its dial prefixes (caller assignments) are removed. Processes and call servers it created stay.' : 'Delete this batch?')) return;
     try { await api.delete(`/caller-import/batches/${b.id}`); if (b.id === batchId) { setDetail(null); setRows(null); } await loadHistory(); } catch (e) { setError(errText(e, 'Delete failed')); }
   }
 
@@ -205,7 +205,7 @@ export function CallerImportPage() {
             { key: 's', header: 'Status', render: (b) => <Badge tone={rowTone(b.status === 'imported' ? 'valid' : b.status === 'rejected' || b.status === 'failed' ? 'invalid' : '')}>{b.status.replace('_', ' ')}</Badge> },
             { key: 'a', header: '', render: (b) => <div className="row">
               <Button size="small" variant="secondary" onClick={() => errorReport(b.id)}>Error report</Button>
-              <Button size="small" variant="danger" onClick={() => removeBatch(b)}>{b.status === 'imported' ? 'Roll back' : 'Delete'}</Button>
+              <Button size="small" variant="danger" onClick={() => removeBatch(b)}>Delete</Button>
             </div> },
           ]} />
         {history && history.total > history.limit && (

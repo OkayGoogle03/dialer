@@ -90,3 +90,4 @@ Requirement: calls go through the **call server (PBX), whose IP is dynamic**. Th
 
 7. Screens removed (D-044): SIP Providers, DIDs, provider/DID assignment panel, ARI/environment/limit fields, routing strategy. Process page now shows dial prefixes. Backend endpoints for them still exist.
 8. Full API suite after this work: 158/158 passed (16 suites, TiDB). Web typecheck/lint/build clean; the screen trimming and desktop app were verified by typecheck/lint/build and a launch check only, not re-tested in the browser.
+9. Deletes now cascade (D-045); user delete added; Download App page (D-046) shows "not published" until DESKTOP_DOWNLOAD_URL is set. Related API tests pass (softphone 9, caller-import, master-data, roles-teams); the new UI was only typechecked/linted, not viewed in the browser.

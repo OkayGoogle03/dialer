@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthUser, RequestContext } from '../common/auth/auth.types';
 import { CurrentUser, ReqContext, RequirePermissions } from '../common/auth/decorators';
@@ -27,6 +27,13 @@ export class UsersController {
   @RequirePermissions('users:manage')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateUserDto, @ReqContext() ctx: RequestContext) {
     return this.users.create(user, dto, ctx);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermissions('users:manage')
+  remove(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @ReqContext() ctx: RequestContext) {
+    return this.users.remove(user, id, ctx);
   }
 
   @Patch(':id')
