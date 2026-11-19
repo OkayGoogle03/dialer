@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Project Dialer - Server</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>body{font:14px system-ui,sans-serif;margin:32px;background:#0f172a;color:#e2e8f0}input,button{font:inherit;padding:8px 10px;border-radius:6px;border:1px solid #475569}input{width:100%;box-sizing:border-box;background:#1e293b;color:#e2e8f0}button{margin-top:12px;background:#2563eb;color:#fff;border:0;cursor:pointer}.err{color:#fca5a5;margin-top:8px}.hint{color:#94a3b8}</style></head>
+<body><h2>Project Dialer</h2>
+<p class="hint">Enter the address of your Dialer server (the same address you use in the browser).</p>
+<form id="f"><input id="s" placeholder="https://dialer.example.com" autofocus autocomplete="off"><button>Connect</button></form>
+<div id="e" class="err"></div>
+<script>
+const q = new URLSearchParams(location.search); if (q.get('error')) document.getElementById('e').textContent = q.get('error');
+window.desktop.getServer().then(v => { if (v) document.getElementById('s').value = v; });
+document.getElementById('f').addEventListener('submit', async (ev) => { ev.preventDefault(); const r = await window.desktop.setServer(document.getElementById('s').value); if (!r.ok) document.getElementById('e').textContent = r.message; });
+</script></body></html>

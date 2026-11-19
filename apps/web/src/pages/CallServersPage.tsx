@@ -21,12 +21,6 @@ const fields = [
   { name: 'sipTransport', label: 'Transport', type: 'select' as const, options: TRANSPORTS },
   { name: 'sipWsPath', label: 'WebSocket path', hint: 'Usually /ws' },
   { name: 'sipRealm', label: 'SIP domain / realm (optional)', hint: 'Defaults to the server address. Set it if your PBX expects a domain name.' },
-  { name: 'instanceId', label: 'Asterisk instance identifier (optional)' },
-  { name: 'ariUrl', label: 'ARI endpoint URL (optional)', hint: 'Only needed for server-side call control, e.g. https://ast01.example.com:8089/ari' },
-  { name: 'ariUsername', label: 'ARI username (optional)' },
-  { name: 'ariPassword', label: 'ARI password (optional)', type: 'password' as const, hint: 'Write-only. Stored encrypted; leave blank to keep the current one.' },
-  { name: 'environment', label: 'Environment', type: 'select' as const, options: [{ value: 'production', label: 'Production' }, { value: 'staging', label: 'Staging' }, { value: 'development', label: 'Development' }] },
-  { name: 'maxConcurrentCalls', label: 'Max concurrent calls', type: 'number' as const },
 ];
 
 export function CallServersPage() {
@@ -45,22 +39,19 @@ export function CallServersPage() {
     <>
       <PageHeader title="Call Servers" actions={manage && <Button onClick={() => setForm(form ? null : 'new')}>{form ? 'Close' : 'Add call server'}</Button>} />
       <Notice>
-        Agents' softphones register with the call server listed here, using their own SIP ID (see SIP accounts below). The server's IP can change: edit the address and agents reconnect to the new one within a few minutes. Changing the address does not deactivate the server. The optional ARI test is only a server-side check.
+        Agents' softphones register with the call server listed here, using their own SIP ID (see SIP accounts below). The server's IP can change: edit the address and agents reconnect to the new one within a few minutes. Changing the address does not deactivate the server.
       </Notice>
       {msg && <Alert tone={msg.ok ? 'success' : 'error'}>{msg.text}</Alert>}
-      {form && <ConfigForm title={form === 'new' ? 'New call server' : `Edit ${form.name}`} fields={fields} initial={form === 'new' ? { environment: 'production', sipTransport: 'wss', sipWsPath: '/ws' } : (form as unknown as Record<string, unknown>)}
+      {form && <ConfigForm title={form === 'new' ? 'New call server' : `Edit ${form.name}`} fields={fields} initial={form === 'new' ? { sipTransport: 'wss', sipWsPath: '/ws' } : (form as unknown as Record<string, unknown>)}
         submitLabel="Save call server" onCancel={() => setForm(null)}
         onSubmit={async (v) => { if (form === 'new') await api.post('/call-servers', v); else await api.put(`/call-servers/${form.id}`, v); setForm(null); await reload(); }} />}
       <DataTable rows={items} error={error} rowKey={(s) => s.id} empty="No call servers yet. Add one, or import caller assignments to propose them."
         columns={[
           { key: 'n', header: 'Server', render: (s) => <><strong>{s.name}</strong><div className="hint">{s.webrtcUrl ?? (s.host ? `${s.sipTransport}://${s.host}${s.port ? `:${s.port}` : ''}` : 'SIP address not set')}</div></> },
           { key: 'u', header: 'Address updated', render: (s) => (s.addressUpdatedAt ? new Date(s.addressUpdatedAt).toLocaleString() : '—') },
-          { key: 'e', header: 'Environment', render: (s) => s.environment },
-          { key: 'c', header: 'ARI check', render: (s) => (s.ariUrl ? <><Badge tone={statusTone(s.connectionStatus)}>{s.connectionStatus}</Badge>{s.connectionError && <div className="hint">{s.connectionError}</div>}</> : <span className="hint">not used</span>) },
           { key: 's', header: 'Status', render: (s) => <Badge tone={statusTone(s.status)}>{s.status.replace('_', ' ')}</Badge> },
           { key: 'a', header: '', render: (s) => manage && (
             <div className="row">
-              {s.ariUrl && <Button size="small" variant="secondary" onClick={() => act(async () => { const r = await api.post<{ ok: boolean; message: string }>(`/call-servers/${s.id}/test`); setMsg({ ok: r.ok, text: `${s.name}: ${r.message}` }); })}>Test ARI</Button>}
               {s.status === 'active' ? <Button size="small" variant="secondary" onClick={() => act(() => api.put(`/call-servers/${s.id}`, { status: 'disabled' }))}>Disable</Button>
                 : <Button size="small" variant="secondary" onClick={() => act(() => api.put(`/call-servers/${s.id}`, { status: 'active' }))}>Activate</Button>}
               <Button size="small" variant="secondary" onClick={() => setForm(s)}>Edit</Button>

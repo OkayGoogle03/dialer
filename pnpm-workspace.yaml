@@ -5,3 +5,5 @@ packages:
 allowBuilds:
   esbuild: true
   "@scarf/scarf": false   # telemetry only
+  electron: true          # downloads the Electron binary (desktop app)
+  electron-winstaller: false

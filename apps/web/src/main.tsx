@@ -12,8 +12,6 @@ import { RolesPage } from './pages/RolesPage';
 import { TeamsPage } from './pages/TeamsPage';
 import { PlatformTenantsPage } from './pages/PlatformTenantsPage';
 import { PlatformOverviewPage } from './pages/PlatformOverviewPage';
-import { ProvidersPage } from './pages/ProvidersPage';
-import { DidsPage } from './pages/DidsPage';
 import { ProcessesPage } from './pages/ProcessesPage';
 import { CallServersPage } from './pages/CallServersPage';
 import { CallerImportPage } from './pages/CallerImportPage';
@@ -54,8 +52,6 @@ createRoot(document.getElementById('root')!).render(
             <Route path="users" element={<RequireAuth perm="users:read"><UsersPage /></RequireAuth>} />
             <Route path="teams" element={<RequireAuth perm="users:read"><TeamsPage /></RequireAuth>} />
             <Route path="roles" element={<RequireAuth perm="roles:manage"><RolesPage /></RequireAuth>} />
-            <Route path="providers" element={<RequireAuth perm="master_data:read"><ProvidersPage /></RequireAuth>} />
-            <Route path="dids" element={<RequireAuth perm="master_data:read"><DidsPage /></RequireAuth>} />
             <Route path="processes" element={<RequireAuth perm="master_data:read"><ProcessesPage /></RequireAuth>} />
             <Route path="call-servers" element={<RequireAuth perm="master_data:read"><CallServersPage /></RequireAuth>} />
             <Route path="caller-import" element={<RequireAuth perm="caller_import:manage"><CallerImportPage /></RequireAuth>} />

@@ -8,8 +8,6 @@ const NAV: { to: string; label: string; perm?: string }[] = [
   { to: '/softphone', label: 'Softphone', perm: 'calls:make' },
   { to: '/caller-import', label: 'Caller Excel Import', perm: 'caller_import:manage' },
   { to: '/processes', label: 'Processes', perm: 'master_data:read' },
-  { to: '/providers', label: 'SIP Providers', perm: 'master_data:read' },
-  { to: '/dids', label: 'DIDs', perm: 'master_data:read' },
   { to: '/call-servers', label: 'Call Servers', perm: 'master_data:read' },
   { to: '/teams', label: 'Teams', perm: 'users:read' },
   { to: '/roles', label: 'Roles', perm: 'roles:manage' },

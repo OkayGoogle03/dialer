@@ -83,7 +83,10 @@ Requirement: calls go through the **call server (PBX), whose IP is dynamic**. Th
 ### Not verified / limitations (read before relying on this)
 1. **No real PBX was available.** Backend behaviour is tested on TiDB; the browser path was exercised in a real browser against a local fake WebSocket SIP responder (accepts any REGISTER, rings, answers INVITE with 486): registration, the INVITE target `sip:919876543210@pbx.local` (typed 9876543210 + prefix 91), the failed-call log (486 recorded), and an address change by the admin (port 8089 -> 8088) picked up on focus without a reload. The browser pane blocks the microphone, so `getUserMedia` was stubbed with a synthetic tone for that run. **Real Asterisk/WebRTC (DTLS-SRTP, ICE, audio) is untested.** The PBX must expose WSS with a valid certificate and WebRTC-enabled endpoints.
 2. Call status is reported by the browser; until PBX call events are wired (Phase 2) a closed tab can leave a call `initiated`/`ringing`.
-3. UDP/TCP/TLS SIP is not possible in a browser; it needs the Windows desktop app (**not started**).
+3. UDP/TCP/TLS SIP is not possible in a browser. The Windows app (apps/desktop, Electron) is built (`Project Dialer Setup 0.1.0.exe`, 77 MB, unsigned, default icon) and was launched once (opens the server-address screen), but it was **not** tested against a deployed server or a real PBX, and it uses the same WebSocket/WebRTC stack, so native UDP/TCP SIP (PJSIP) is still not available.
 4. The agent's SIP password reaches their browser by design (D-041). Use a low-privilege extension per agent on the PBX.
 5. The dashboard "last 24 hours" card still reads the old trunk-routing statistics and therefore does not count softphone calls.
 6. Provider/DID/trunk data and the Excel columns are retained but ignored for routing.
+
+7. Screens removed (D-044): SIP Providers, DIDs, provider/DID assignment panel, ARI/environment/limit fields, routing strategy. Process page now shows dial prefixes. Backend endpoints for them still exist.
+8. Full API suite after this work: 158/158 passed (16 suites, TiDB). Web typecheck/lint/build clean; the screen trimming and desktop app were verified by typecheck/lint/build and a launch check only, not re-tested in the browser.
