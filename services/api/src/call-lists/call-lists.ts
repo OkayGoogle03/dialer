@@ -240,16 +240,17 @@ export class CallListsService {
     }));
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Call results');
-    const headers = ['Row', 'Process Name', 'Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Dialed Number', 'Status', 'Result / Reason', 'SIP Code', 'Attempts', 'Called At (UTC)', 'Answered At (UTC)', 'Ended At (UTC)', 'Duration (s)'];
+    // same columns and order as the upload sheet (without the password), then the two result columns Status and Note
+    const headers = ['Row', 'Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Process Name', 'Status', 'Note', 'Dialed Number', 'SIP Code', 'Attempts', 'Called At (UTC)', 'Answered At (UTC)', 'Ended At (UTC)', 'Duration (s)'];
     ws.addRow(headers);
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
     ws.columns = headers.map((h) => ({ width: Math.max(12, h.length + 2) }));
     for (const r of rows) {
-      ws.addRow([r.row_no, safe(r.process_name), safe(r.server_host), safe(r.sip_id), safe(r.prefix), safe(r.phone), safe(r.dialed), STATUS_LABEL[r.status] ?? r.status, safe(r.result), r.sip_code ?? '', r.attempts,
+      ws.addRow([r.row_no, safe(r.server_host), safe(r.sip_id), safe(r.prefix), safe(r.phone), safe(r.process_name), `${STATUS_LABEL[r.status] ?? r.status}${r.sip_code ? ` (${r.sip_code})` : ''}`, safe(r.result), safe(r.dialed), r.sip_code ?? '', r.attempts,
         r.called_at ? new Date(r.called_at).toISOString() : '', r.answered_at ? new Date(r.answered_at).toISOString() : '', r.ended_at ? new Date(r.ended_at).toISOString() : '', r.duration_seconds ?? '']);
     }
-    for (const c of [2, 3, 4, 5, 6, 7]) ws.getColumn(c).numFmt = '@';
+    for (const c of [2, 3, 4, 5, 6, 9]) ws.getColumn(c).numFmt = '@';
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename: `${list.name.replace(/[^A-Za-z0-9._-]+/g, '_')}_results.xlsx` };
   }
 

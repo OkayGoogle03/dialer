@@ -93,7 +93,8 @@ export function useSoftphone() {
       clearRing();
       if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause }); setCall({ ...IDLE_CALL, note: timeoutCause + ' - call disconnected' }); session.current = null; return; }
       const code = e?.message?.status_code as number | undefined;
-      track(base.callId, 'failed', { cause: String(e?.cause ?? 'failed').slice(0, 100), ...(code ? { sipCode: code } : {}) });
+      const phrase = e?.message?.reason_phrase as string | undefined;
+      track(base.callId, 'failed', { cause: `${e?.cause ?? 'failed'}${phrase && !String(e?.cause ?? '').includes(phrase) ? ` - ${phrase}` : ''}`.slice(0, 100), ...(code ? { sipCode: code } : {}) });
       setCall({ ...IDLE_CALL, note: `Call failed: ${e?.cause ?? 'unknown'}${code ? ` (${code})` : ''}` });
       session.current = null;
     });

@@ -137,7 +137,7 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     await wb.xlsx.load(res.body as ExcelJS.Buffer);
     const ws = wb.worksheets[0];
     const head = (ws.getRow(1).values as string[]).slice(1);
-    expect(head).toEqual(expect.arrayContaining(['Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Process Name', 'Status', 'Result / Reason', 'Duration (s)']));
+    expect(head).toEqual(expect.arrayContaining(['Call Server IP', 'SIP ID', 'Prefix', 'Phone Number', 'Process Name', 'Status', 'Note', 'Duration (s)']));
     expect(ws.rowCount).toBe(6);
     const text = JSON.stringify(ws.getSheetValues());
     expect(text).not.toContain('excel-sip-secret-1');
