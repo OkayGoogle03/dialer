@@ -137,15 +137,15 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--brand-primary)
   align-self: start; position: sticky; top: 92px; z-index: 25; width: 64px; overflow: hidden; display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 8px; border-radius: 32px;
   background: linear-gradient(180deg, var(--nav-2), var(--nav)); box-shadow: var(--shadow-nav); transition: width .24s cubic-bezier(.2, .8, .2, 1), border-radius .24s;
 }
-/* hovering (or keyboard focus inside) expands the rail over the page and shows the labels; leaving collapses it to icons again */
-.rail:hover, .rail:focus-within { width: 224px; border-radius: 28px; }
+/* hovering (or keyboard focus; a mouse click does not keep it open) expands the rail over the page and shows the labels; leaving collapses it to icons again */
+.rail:hover, .rail:has(:focus-visible) { width: 224px; border-radius: 28px; }
 .rail a { position: relative; height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 12px; border-radius: 22px; white-space: nowrap; color: rgba(243, 233, 221, .72); text-decoration: none; transition: color .16s ease, background .16s; }
 .rail a svg { flex: none; }
 .rail a:hover { color: #fff; background: rgba(255, 255, 255, .08); }
 .rail a.active { color: #fff; box-shadow: inset 3px 4px 8px rgba(0, 0, 0, .55), inset -1px -1px 3px rgba(255, 255, 255, .1); background: rgba(0, 0, 0, .25); }
 .rail a.active::after { content: ''; position: absolute; left: 2px; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--brand-primary); }
 .rail .lbl { font-size: 13.5px; font-weight: 600; opacity: 0; transform: translateX(-6px); transition: opacity .18s, transform .18s; }
-.rail:hover .lbl, .rail:focus-within .lbl { opacity: 1; transform: none; transition-delay: .06s; }
+.rail:hover .lbl, .rail:has(:focus-visible) .lbl { opacity: 1; transform: none; transition-delay: .06s; }
 
 .main { min-width: 0; padding: 4px 0 90px; overflow-x: visible; }
 .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6); }
