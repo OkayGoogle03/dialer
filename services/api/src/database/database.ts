@@ -146,6 +146,10 @@ export class Database {
 export class PlatformDatabase {
   constructor(private readonly pool: Pool) {}
 
+  async ping(): Promise<void> {
+    await this.withPlatform((tx) => tx.query('SELECT 1'));
+  }
+
   withPlatform<T>(fn: (tx: SqlRunner) => Promise<T>): Promise<T> {
     return inTransaction(this.pool, (conn) => fn(runner(conn, () => undefined)));
   }
