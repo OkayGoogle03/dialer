@@ -258,3 +258,15 @@ input[type='file']::file-selector-button { font: inherit; font-weight: 600; marg
 .dash-main > .card, .dash-two > .card { margin-top: 0; }
 @media (max-width: 900px) { .dash-main { grid-template-columns: minmax(0, 1fr); } }
 .badge { white-space: nowrap; }
+
+/* ---------- softphone: equal-height cards, scrolling call history without a visible scrollbar, iPhone-style dial pad */
+.sp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: stretch; }
+.sp-grid > .card { margin-top: 0; }
+.sp-calls { display: flex; flex-direction: column; min-height: 0; max-height: 520px; }
+.sp-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
+.sp-scroll::-webkit-scrollbar { display: none; }
+.sp-scroll .table-wrap { overflow: visible; box-shadow: none; background: transparent; }
+.sp-scroll th { position: sticky; top: 0; z-index: 1; }
+/* side by side: the history never makes the row taller, so both cards share the phone card's height */
+@media (min-width: 1000px) { .sp-calls { contain: size; max-height: none; } }
+.sp-list { margin-top: var(--space-6); }

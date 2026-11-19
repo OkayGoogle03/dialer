@@ -69,7 +69,7 @@ export function SoftphonePage() {
       {sp.error && <Alert>{sp.error}</Alert>}
       {sp.call.note && sp.call.state === 'idle' && <Alert>{sp.call.note}</Alert>}
       <audio ref={sp.audio} autoPlay />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, alignItems: 'start' }}>
+      <div className="sp-grid">
         <Card title="Phone">
           <p className="hint" style={{ marginTop: 0 }}>
             {sp.account?.sipId} @ {sp.account?.callServer.name} <span>({sp.account?.callServer.webrtcUrl ?? 'no WebSocket address'})</span>
@@ -112,13 +112,13 @@ export function SoftphonePage() {
             </form>
           )}
         </Card>
-        <Card title="Recent calls">
-          <DataTable rows={log} rowKey={(c) => c.id} empty="No calls yet."
+        <Card title="Recent calls" className="sp-calls">
+          <div className="sp-scroll"><DataTable rows={log} rowKey={(c) => c.id} empty="No calls yet."
             columns={[
               { key: 't', header: 'Started', render: (c) => new Date(c.startedAt).toLocaleTimeString() },
               { key: 'd', header: 'Dialled', render: (c) => <>{c.dialed}{c.prefix && <div className="hint">typed {c.entered} + prefix {c.prefix}</div>}{c.processName && <div className="hint">Process: {c.processName}</div>}</> },
               { key: 's', header: 'Status', render: (c) => <><Badge tone={c.status === 'completed' ? 'ok' : c.status === 'failed' ? 'off' : undefined}>{c.status}</Badge>{c.durationSeconds != null && <div className="hint">{c.durationSeconds}s</div>}</> },
-            ]} />
+            ]} /></div>
           <div style={{ marginTop: 8 }}><Button size="small" variant="secondary" onClick={loadLog}>Refresh</Button></div>
         </Card>
       </div>
@@ -186,7 +186,7 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
   };
   const redial = (i: CallListItem) => ['pending', 'success', 'not_success', 'failed', 'not_answered', 'completed'].includes(i.status);
   return (
-    <Card title="My call list" className="stack">
+    <Card title="My call list" className="stack sp-list">
       <div className="row">
         <SelectField label="List" value={listId ?? ''} onChange={(e) => setListId(e.target.value)} options={lists.map((l) => ({ value: l.id, label: l.name }))} />
         <Button disabled={!idle || !next || sp.reg === 'idle'} onClick={() => next && void dial(next)}>Call next</Button>
