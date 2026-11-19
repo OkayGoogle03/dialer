@@ -143,10 +143,10 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
   useEffect(() => { setKick((k) => k + 1); }, [sp.call.state]);
 
   const next = data?.items.find((i) => i.status === 'pending');
-  const dial = async (i: CallListItem) => { if (listId) { setMsg(null); await sp.dialItem(listId, i.id); setKick((k) => k + 1); } };
+  const dial = async (i: CallListItem) => { if (listId) { setMsg(null); await sp.dialItem(listId, i); setKick((k) => k + 1); } };
   // auto-dial: when a call ends and the agent enabled it, start the next pending number after a short pause
   useEffect(() => {
-    if (!auto || !idle || !next || sp.reg !== 'registered') return;
+    if (!auto || !idle || !next || sp.reg === 'idle' || sp.reg === 'connecting') return;
     const t = setTimeout(() => void dial(next), 1500);
     return () => clearTimeout(t);
   }, [auto, idle, next?.id, sp.reg]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -157,14 +157,14 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
     <Card title="My call list" className="stack">
       <div className="row">
         <SelectField label="List" value={listId ?? ''} onChange={(e) => setListId(e.target.value)} options={lists.map((l) => ({ value: l.id, label: l.name }))} />
-        <Button disabled={!idle || !next || sp.reg !== 'registered'} onClick={() => next && void dial(next)}>Call next</Button>
+        <Button disabled={!idle || !next || sp.reg === 'idle'} onClick={() => next && void dial(next)}>Call next</Button>
         <label><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto-dial next</label>
         <Button variant="secondary" size="small" onClick={() => listId && exportList(listId, setMsg)}>Export Excel</Button>
       </div>
       {data && <Counts counts={data.counts} />}
       {msg && <Alert>{msg}</Alert>}
       <CallListRows items={data?.items ?? null} error={error}
-        action={(i) => redial(i) ? <Button size="small" variant="secondary" disabled={!idle || sp.reg !== 'registered'} onClick={() => void dial(i)}>{i.status === 'pending' ? 'Call' : 'Redial'}</Button> : null} />
+        action={(i) => redial(i) ? <Button size="small" variant="secondary" disabled={!idle || sp.reg === 'idle'} onClick={() => void dial(i)}>{i.status === 'pending' ? 'Call' : 'Redial'}</Button> : null} />
     </Card>
   );
 }

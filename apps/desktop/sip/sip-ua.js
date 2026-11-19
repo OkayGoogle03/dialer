@@ -131,7 +131,7 @@ class SipUa extends EventEmitter {
       ...(auth ? [`${auth.header}: ${digestHeader(auth.challenge, { user: this.o.sipId, password: this.o.password, method: 'REGISTER', uri, nc: 1 })}`] : []),
       'Content-Length: 0', '', ''].join(CRLF));
     clearTimeout(this.regTimer);
-    this.regTimer = setTimeout(() => { if (!this.registered) this.emit('registrationFailed', { reason: 'no response from the call server (timeout)' }); }, 8000);
+    if (this.o.expires !== 0) this.regTimer = setTimeout(() => { if (!this.registered && !this.stopped) this.emit('registrationFailed', { reason: 'no response from the call server (timeout)' }); }, 8000);
   }
 
   stop() {
@@ -162,7 +162,8 @@ class SipUa extends EventEmitter {
   onRegisterResponse(msg) {
     if (cseqNum(msg) !== this.regCseq) return;
     if (msg.status === 401 || msg.status === 407) {
-      if (this.authTried) { this.authTried = false; clearTimeout(this.regTimer); return this.emit('registrationFailed', { code: msg.status, reason: 'the call server rejected the SIP ID or password' }); }
+      const stale = /stale=true/i.test(h(msg, msg.status === 401 ? 'www-authenticate' : 'proxy-authenticate'));
+      if (this.authTried && !stale) { this.authTried = false; clearTimeout(this.regTimer); return this.emit('registrationFailed', { code: msg.status, reason: 'the call server rejected the SIP ID or password' }); }
       this.authTried = true;
       return this.register({ header: msg.status === 401 ? 'Authorization' : 'Proxy-Authorization', challenge: h(msg, msg.status === 401 ? 'www-authenticate' : 'proxy-authenticate') });
     }
@@ -216,7 +217,9 @@ class SipUa extends EventEmitter {
     if (cseqNum(msg) !== c.cseq) return;
     const toTag = tagOf(h(msg, 'to'));
     if (msg.status >= 100 && msg.status < 200) {
-      if (msg.status >= 180 && c.state === 'dialing') { c.state = 'ringing'; this.emit('call', { state: 'ringing' }); }
+      if (msg.status >= 180 && c.state === 'dialing') { c.state = 'ringing'; this.emit('call', { state: 'ringing', code: msg.status }); }
+      else if (msg.status === 180 && c.state === 'ringing' && !c.saw180) this.emit('call', { state: 'ringing', code: 180 });
+      if (msg.status === 180) c.saw180 = true;
       if (msg.status === 183 && msg.body) this.useRemoteMedia(msg.body);
       return;
     }

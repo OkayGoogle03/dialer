@@ -42,6 +42,11 @@ describe('call outcome: Success when the phone was reached, Not success when it 
     expect(failed(480, 'Temporarily Unavailable', false).status).toBe('not_success');
   });
 
+  it('ring limit without a real 180 Ringing is Not success (user did not receive the call)', () => {
+    expect(classifyOutcome({ final: 'completed', answered: false, rang: false, cause: 'No ringing within 5 s (the call server only sent progress / early media)' }))
+      .toMatchObject({ status: 'not_success', note: expect.stringMatching(/did not ring/) });
+  });
+
   it('cancelling before the phone rang is Not success', () => {
     expect(classifyOutcome({ final: 'completed', answered: false, rang: false, cause: 'Agent ended the call' })).toEqual({ status: 'not_success', note: 'Call cancelled before the phone started ringing' });
     expect(failed(487, 'Request Terminated', false).status).toBe('not_success');

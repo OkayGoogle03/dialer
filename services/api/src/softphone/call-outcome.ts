@@ -35,6 +35,7 @@ export function classifyOutcome(i: OutcomeInput): Outcome {
       if (/agent|local|terminated|hung up/.test(c)) return ok(`Call answered; the agent ended the call${dur}`);
       return ok(`Call answered and completed${dur}`);
     }
+    if (/no ringing/.test(c)) return no(`Not connected: the phone did not ring within the limit (${cause})`);
     if (/ring limit|no answer/.test(c)) return ok(`Phone rang but the user did not answer (${cause.replace(/^no answer within /i, 'ring limit ').replace(/\s*\(ring limit\)/i, '')})`);
     if (i.rang) return ok('Phone rang; the call was cancelled before the user answered');
     return no('Call cancelled before the phone started ringing');

@@ -78,12 +78,14 @@ function registerSip() {
     const transport = cfg.transport === 'tcp' ? 'tcp' : 'udp';
     const ua = new SipUa({ server: String(cfg.host), port: Number(cfg.port) || 5060, transport, sipId: String(cfg.sipId), password: String(cfg.password), realm: cfg.realm ? String(cfg.realm) : undefined, displayName: cfg.displayName ? String(cfg.displayName) : undefined });
     sip = ua;
-    ua.on('registered', (d) => emitSip('registered', d));
-    ua.on('registrationFailed', (d) => emitSip('registrationFailed', d));
-    ua.on('disconnected', () => emitSip('disconnected', {}));
-    ua.on('error', (e) => emitSip('error', { message: String(e && e.message || e) }));
-    ua.on('call', (d) => emitSip('call', d));
-    ua.on('audio', (pcm) => { if (win && !win.isDestroyed()) win.webContents.send('sip:audio', pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength)); });
+    // Events of a previous (stopped) user agent must never reach the page: they would be blamed on the new account.
+    const cur = (fn) => (...a) => { if (sip === ua) fn(...a); };
+    ua.on('registered', cur((d) => emitSip('registered', d)));
+    ua.on('registrationFailed', cur((d) => emitSip('registrationFailed', d)));
+    ua.on('disconnected', cur(() => emitSip('disconnected', {})));
+    ua.on('error', cur((e) => emitSip('error', { message: String((e && e.message) || e) })));
+    ua.on('call', cur((d) => emitSip('call', d)));
+    ua.on('audio', cur((pcm) => { if (win && !win.isDestroyed()) win.webContents.send('sip:audio', pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength)); }));
     try { await ua.start(); return { ok: true, localIp: ua.localIp }; } catch (e) { sip = null; return { ok: false, message: String(e && e.message || e) }; }
   }));
   ipcMain.handle('sip:stop', guard(() => { if (sip) { sip.stop(); sip = null; } }));

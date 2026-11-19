@@ -41,6 +41,10 @@ export function useSoftphone() {
   const keyRef = useRef('');
   const audio = useRef<HTMLAudioElement | null>(null);
   const accountRef = useRef<SoftphoneAccount | undefined>(undefined);
+  const regRef = useRef<RegState>('idle');
+  regRef.current = reg;
+  const regErrRef = useRef<string | null>(null);
+  regErrRef.current = regError;
   const configRef = useRef<SoftphoneConfig | null>(null);
   configRef.current = config;
   const callRef = useRef(call);
@@ -74,9 +78,13 @@ export function useSoftphone() {
     let ringTimer: ReturnType<typeof setTimeout> | null = null;
     let timedOut = false;
     const clearRing = () => { if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; } };
-    const timeoutCause = `No answer within ${ringMs / 1000} s (ring limit)`;
-    s.on('progress', () => {
-      setCall((c) => ({ ...c, state: 'ringing' })); track(base.callId, 'ringing');
+    const timeoutCause = () => (sawRinging ? `No answer within ${ringMs / 1000} s (ring limit)` : `No ringing within ${ringMs / 1000} s (the call server only sent progress / early media)`);
+    let sawRinging = false;
+    s.on('progress', (e: any) => {
+      const code = (e?.response?.status_code as number | undefined) ?? 180;
+      // Only a 180 Ringing proves the called phone is ringing; 183 Session Progress (early media) may be an announcement or ringback from the carrier.
+      if (code !== 183 && !sawRinging) { sawRinging = true; track(base.callId, 'ringing'); }
+      setCall((c) => ({ ...c, state: 'ringing' }));
       if (base.direction === 'out' && !ringTimer && !timedOut) ringTimer = setTimeout(() => { timedOut = true; try { s.terminate(); } catch { /* already ended */ } }, ringMs);
     });
     s.on('accepted', () => {
@@ -91,7 +99,7 @@ export function useSoftphone() {
     });
     s.on('failed', (e: any) => {
       clearRing();
-      if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause }); setCall({ ...IDLE_CALL, note: timeoutCause + ' - call disconnected' }); session.current = null; return; }
+      if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause() }); setCall({ ...IDLE_CALL, note: timeoutCause() + ' - call disconnected' }); session.current = null; return; }
       const code = e?.message?.status_code as number | undefined;
       const phrase = e?.message?.reason_phrase as string | undefined;
       track(base.callId, 'failed', { cause: `${e?.cause ?? 'failed'}${phrase && !String(e?.cause ?? '').includes(phrase) ? ` - ${phrase}` : ''}`.slice(0, 100), ...(code ? { sipCode: code } : {}) });
@@ -100,7 +108,7 @@ export function useSoftphone() {
     });
     s.on('ended', (e: any) => {
       clearRing();
-      if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause }); setCall({ ...IDLE_CALL, note: timeoutCause + ' - call disconnected' }); session.current = null; return; }
+      if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause() }); setCall({ ...IDLE_CALL, note: timeoutCause() + ' - call disconnected' }); session.current = null; return; }
       const remote = e?.originator === 'remote' || /remote/i.test(String(e?.cause ?? ''));
       track(base.callId, 'completed', { cause: remote ? 'Called party disconnected' : 'Agent ended the call' }); finishCall();
     });
@@ -204,21 +212,35 @@ export function useSoftphone() {
     } catch (e) { setError(errText(e, 'Could not place the call')); }
   }, [reg, startCall]);
 
-  /** Dials one row of an Excel call list (its own prefix / call server). */
-  const dialItem = useCallback(async (listId: string, itemId: string): Promise<boolean> => {
-    if (!ua.current || reg !== 'registered' || callRef.current.state !== 'idle') { setError('Not registered with the call server yet, or a call is in progress.'); return false; }
+  /** Dials one row of an Excel call list. Each row names its own call server and SIP ID: the softphone switches its registration to that account first. */
+  const dialItem = useCallback(async (listId: string, item: { id: string; serverHost: string | null; sipId: string | null }): Promise<boolean> => {
+    if (callRef.current.state !== 'idle') { setError('A call is already in progress.'); return false; }
+    const accts = configRef.current?.accounts ?? [];
+    const host = (item.serverHost ?? '').toLowerCase();
+    const target = accts.find((x) => x.sipId === item.sipId && (x.callServer.host ?? '').toLowerCase() === host);
+    if (!target) { setError(`No SIP account ${item.sipId} on ${item.serverHost} was found. Reload the page; ask your admin if it still fails.`); return false; }
     setError(null);
+    if (keyRef.current !== uaKey(target) || regRef.current !== 'registered') {
+      if (accountRef.current?.id !== target.id) setAccountId(target.id);
+      else if (regRef.current === 'failed') { keyRef.current = ''; void refresh(); }
+      const t0 = Date.now();
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 250));
+        if (keyRef.current === uaKey(target) && regRef.current === 'registered' && ua.current) break;
+        if (Date.now() - t0 > 12000) { setError(`Could not register ${target.sipId} on ${target.callServer.name}: ${regErrRef.current ?? 'no response from the call server'}`); return false; }
+      }
+    }
     try {
-      const placed = await api.post<{ callId: string; dialed: string; prefix: string; target: string; accountId: string }>(`/call-lists/${listId}/items/${itemId}/call`);
+      const placed = await api.post<{ callId: string; dialed: string; prefix: string; target: string; accountId: string }>(`/call-lists/${listId}/items/${item.id}/call`);
       if (placed.accountId !== accountRef.current?.id) {
         api.patch(`/softphone/calls/${placed.callId}`, { status: 'failed', cause: 'Softphone is registered with a different SIP account' }).catch(() => undefined);
-        setError('This row belongs to a different SIP account than the one registered. Select that account first.');
+        setError('The softphone switched accounts while placing the call. Please press Call again.');
         return false;
       }
       await startCall(placed);
       return true;
     } catch (e) { setError(errText(e, 'Could not place the call')); return false; }
-  }, [reg, startCall]);
+  }, [refresh, startCall]);
 
   const hangup = useCallback(() => { try { session.current?.terminate(); } catch { /* already ended */ } }, []);
   const answer = useCallback(() => {

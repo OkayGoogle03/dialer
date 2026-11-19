@@ -97,7 +97,7 @@ export async function startNative(acct: NativeAccount, h: NativeHandlers) {
       const state = d.state as string;
       if (state === 'incoming') { session = new NativeSession(sip, audio); h.onIncoming(session, String(d.from ?? 'unknown')); return; }
       if (!session) return;
-      if (state === 'ringing') session.emit('progress');
+      if (state === 'ringing') session.emit('progress', { response: { status_code: Number(d.code ?? 180) } });
       else if (state === 'in_call') { session.emit('accepted'); void session.openAudio(); }
       else if (state === 'failed') { session.emit('failed', { cause: String(d.reason ?? 'failed'), message: d.code ? { status_code: d.code } : undefined }); session.closeAudio(); session = null; }
       else if (state === 'ended') { const s = session; session = null; s.closeAudio(); s.emit('ended', { cause: String(d.reason ?? 'ended') }); }
