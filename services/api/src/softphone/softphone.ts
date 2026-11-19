@@ -180,6 +180,14 @@ export class SoftphoneService {
         if (!ca) throw new BadRequestException('Dial option not found for this call server');
         prefix = ca.prefix; plan = { ...DEFAULT_DIAL_PLAN, ...(ca.dial_plan ?? {}) }; process = { id: ca.pid, name: ca.pname };
       }
+      return this.placeInTx(tx, actor, acct, dto.destination, prefix, plan, process, ctx, {});
+    });
+  }
+
+  /** Normalises (prefix etc.), writes the call_sessions row + call.created. Shared by manual dialing and call-list rows. */
+  async placeInTx(tx: SqlRunner, actor: AuthUser, acct: Row, destination: string, prefix: string, plan: typeof DEFAULT_DIAL_PLAN, process: { id: string; name: string } | null, ctx: RequestContext, extraMeta: Record<string, unknown>) {
+    {
+      const dto = { destination };
       const n = normalizeDestination(dto.destination, prefix, plan);
       if (!n.ok) throw new BadRequestException({ code: n.code, message: n.message });
       const id = newId();
@@ -187,11 +195,11 @@ export class SoftphoneService {
         `INSERT INTO call_sessions (id, tenant_id, direction, status, from_number, to_number, user_id, correlation_id, metadata)
          VALUES (:id, :tenantId, 'outbound', 'initiated', :from, :to, :me, :cid, :meta)`,
         { id, from: acct.sip_id.slice(0, 32), to: n.dialed.slice(0, 32), me: actor.userId, cid: ctx.correlationId ?? null,
-          meta: JSON.stringify({ source: 'softphone', accountId: acct.id, callServerId: acct.server_id, prefix, entered: dto.destination.slice(0, 32), process }) });
+          meta: JSON.stringify({ source: 'softphone', accountId: acct.id, callServerId: acct.server_id, prefix, entered: dto.destination.slice(0, 32), process, ...extraMeta }) });
       await this.outbox.enqueue(tx, actor.tenantId, 'call.created', { call_id: id, direction: 'outbound', from: acct.sip_id.slice(0, 32), to: n.dialed.slice(0, 32), user_id: actor.userId, campaign_id: null, queue_id: null });
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'softphone.call_placed', entityType: 'call_session', entityId: id, metadata: { prefix, processId: process?.id ?? null } }, ctx);
       return { callId: id, dialed: n.dialed, prefix, target: `sip:${n.dialed}@${acct.sip_realm || acct.host}` };
-    });
+    }
   }
 
   updateCall(actor: AuthUser, id: string, dto: z.infer<typeof callUpdateSchema>) {
@@ -221,8 +229,25 @@ export class SoftphoneService {
         await tx.execute(`UPDATE call_sessions SET status = 'failed', ended_at = UTC_TIMESTAMP(3), hangup_cause = :c WHERE tenant_id = :tenantId AND id = :id`, { id, c: dto.cause ?? (dto.sipCode ? String(dto.sipCode) : 'failed') });
         await this.outbox.enqueue(tx, actor.tenantId, 'call.failed', { call_id: id, reason: dto.cause ?? 'failed', sip_code: dto.sipCode ?? null });
       }
+      await this.syncListItem(tx, id, dto);
       return { id, status: dto.status };
     });
+  }
+
+  /** Keeps the Excel call-list row in step with the call (live status for the UI and the Excel export). */
+  private async syncListItem(tx: SqlRunner, callId: string, dto: z.infer<typeof callUpdateSchema>) {
+    const base = `UPDATE call_list_items SET`;
+    const where = `WHERE tenant_id = :tenantId AND call_session_id = :cid`;
+    const p = { cid: callId };
+    if (dto.status === 'ringing') await tx.execute(`${base} status = 'ringing' ${where}`, p);
+    else if (dto.status === 'answered') await tx.execute(`${base} status = 'answered', answered_at = UTC_TIMESTAMP(3), result = 'Call answered' ${where}`, p);
+    else if (dto.status === 'completed') {
+      await tx.execute(`${base} ended_at = UTC_TIMESTAMP(3), status = IF(answered_at IS NULL, 'not_answered', 'completed'), result = IF(answered_at IS NULL, 'Ended without being answered', 'Call completed'),
+        duration_seconds = IF(answered_at IS NULL, 0, TIMESTAMPDIFF(SECOND, answered_at, UTC_TIMESTAMP(3))) ${where}`, p);
+    } else {
+      await tx.execute(`${base} ended_at = UTC_TIMESTAMP(3), status = 'failed', result = :r, sip_code = :code, duration_seconds = 0 ${where}`,
+        { ...p, r: (dto.cause ?? 'Call failed').slice(0, 300), code: dto.sipCode ?? null });
+    }
   }
 
   listCalls(actor: AuthUser, q: z.infer<typeof callListSchema>) {

@@ -12,9 +12,8 @@ import { RolesPage } from './pages/RolesPage';
 import { TeamsPage } from './pages/TeamsPage';
 import { PlatformTenantsPage } from './pages/PlatformTenantsPage';
 import { PlatformOverviewPage } from './pages/PlatformOverviewPage';
-import { ProcessesPage } from './pages/ProcessesPage';
 import { CallServersPage } from './pages/CallServersPage';
-import { CallerImportPage } from './pages/CallerImportPage';
+import { CallListsPage } from './pages/CallListsPage';
 import { DownloadPage } from './pages/DownloadPage';
 import { SoftphonePage } from './pages/SoftphonePage';
 import '@dialer/ui/styles.css';
@@ -53,9 +52,10 @@ createRoot(document.getElementById('root')!).render(
             <Route path="users" element={<RequireAuth perm="users:read"><UsersPage /></RequireAuth>} />
             <Route path="teams" element={<RequireAuth perm="users:read"><TeamsPage /></RequireAuth>} />
             <Route path="roles" element={<RequireAuth perm="roles:manage"><RolesPage /></RequireAuth>} />
-            <Route path="processes" element={<RequireAuth perm="master_data:read"><ProcessesPage /></RequireAuth>} />
             <Route path="call-servers" element={<RequireAuth perm="master_data:read"><CallServersPage /></RequireAuth>} />
-            <Route path="caller-import" element={<RequireAuth perm="caller_import:manage"><CallerImportPage /></RequireAuth>} />
+            <Route path="call-lists" element={<RequireAuth perm="caller_import:manage"><CallListsPage /></RequireAuth>} />
+            <Route path="caller-import" element={<Navigate to="/call-lists" replace />} />
+            <Route path="processes" element={<Navigate to="/call-lists" replace />} />
             <Route path="softphone" element={<RequireAuth perm="calls:make"><SoftphonePage /></RequireAuth>} />
             <Route path="download" element={<DownloadPage />} />
             <Route path="dialer" element={<Navigate to="/softphone" replace />} />

@@ -151,17 +151,37 @@ export function useSoftphone() {
   // switching account
   useEffect(() => { if (account && uaKey(account) !== keyRef.current && !callRef.current.callId) void startUa(account); }, [accountId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Dials what the server returned (prefix already applied) and wires the call events. */
+  const startCall = useCallback((placed: { callId: string; dialed: string; prefix: string; target: string }) => {
+    const s = ua.current.call(placed.target, { mediaConstraints: { audio: true, video: false }, rtcOfferConstraints: { offerToReceiveAudio: true }, pcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
+    wireSession(s, { ...IDLE_CALL, state: 'dialing', number: placed.dialed, callId: placed.callId, note: placed.prefix ? `Prefix ${placed.prefix} applied` : null });
+  }, [wireSession]);
+
   const dial = useCallback(async (destination: string, assignmentId?: string) => {
     const acct = accountRef.current;
     if (!acct || !ua.current || reg !== 'registered') { setError('Not registered with the call server yet.'); return; }
     setError(null);
     try {
-      // The server applies the process prefix and records the call; we dial exactly what it returns.
       const placed = await api.post<{ callId: string; dialed: string; prefix: string; target: string }>('/softphone/calls', { accountId: acct.id, destination, ...(assignmentId ? { assignmentId } : {}) });
-      const s = ua.current.call(placed.target, { mediaConstraints: { audio: true, video: false }, rtcOfferConstraints: { offerToReceiveAudio: true }, pcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
-      wireSession(s, { ...IDLE_CALL, state: 'dialing', number: placed.dialed, callId: placed.callId, note: placed.prefix ? `Prefix ${placed.prefix} applied` : null });
+      startCall(placed);
     } catch (e) { setError(errText(e, 'Could not place the call')); }
-  }, [reg, wireSession]);
+  }, [reg, startCall]);
+
+  /** Dials one row of an Excel call list (its own prefix / call server). */
+  const dialItem = useCallback(async (listId: string, itemId: string): Promise<boolean> => {
+    if (!ua.current || reg !== 'registered' || callRef.current.state !== 'idle') { setError('Not registered with the call server yet, or a call is in progress.'); return false; }
+    setError(null);
+    try {
+      const placed = await api.post<{ callId: string; dialed: string; prefix: string; target: string; accountId: string }>(`/call-lists/${listId}/items/${itemId}/call`);
+      if (placed.accountId !== accountRef.current?.id) {
+        api.patch(`/softphone/calls/${placed.callId}`, { status: 'failed', cause: 'Softphone is registered with a different SIP account' }).catch(() => undefined);
+        setError('This row belongs to a different SIP account than the one registered. Select that account first.');
+        return false;
+      }
+      startCall(placed);
+      return true;
+    } catch (e) { setError(errText(e, 'Could not place the call')); return false; }
+  }, [reg, startCall]);
 
   const hangup = useCallback(() => { try { session.current?.terminate(); } catch { /* already ended */ } }, []);
   const answer = useCallback(() => {
@@ -175,5 +195,5 @@ export function useSoftphone() {
   }, []);
   const sendDtmf = useCallback((tone: string) => { try { session.current?.sendDTMF(tone); } catch { /* not connected */ } }, []);
 
-  return { config, account, accountId: account?.id ?? '', setAccountId, reg, regError, call, error, setError, loaded, dial, hangup, answer, mute, sendDtmf, refresh, audio };
+  return { config, account, accountId: account?.id ?? '', setAccountId, reg, regError, call, error, setError, loaded, dial, dialItem, hangup, answer, mute, sendDtmf, refresh, audio };
 }

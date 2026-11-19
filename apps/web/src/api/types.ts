@@ -55,3 +55,15 @@ export interface SipAccountView {
   id: string; userId: string; userEmail: string; userName: string; callServerId: string; callServerName: string; sipId: string; displayName: string | null; status: string;
   hasPassword: boolean; registrationStatus: string; registeredAt: string | null; lastSeenAt: string | null; lastError: string | null;
 }
+
+export interface CallListSummary { id: string; name: string; fileName: string | null; agentId: string; agentName: string; total: number; invalid: number; createdAt: string; counts: Record<string, number> }
+export interface CallListItem {
+  id: string; row: number; serverHost: string | null; sipId: string | null; prefix: string | null; phone: string | null; dialed: string | null; status: string; result: string | null;
+  sipCode: number | null; attempts: number; calledAt: string | null; answeredAt: string | null; endedAt: string | null; durationSeconds: number | null;
+}
+
+export interface CallListSummary { id: string; name: string; fileName: string | null; agentId: string; agentName: string; total: number; invalid: number; createdAt: string; counts: Record<string, number> }
+export interface CallListItem {
+  id: string; row: number; serverHost: string | null; sipId: string | null; prefix: string | null; phone: string | null; dialed: string | null; status: string; result: string | null;
+  sipCode: number | null; attempts: number; calledAt: string | null; answeredAt: string | null; endedAt: string | null; durationSeconds: number | null;
+}

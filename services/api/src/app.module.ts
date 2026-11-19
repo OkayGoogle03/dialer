@@ -38,6 +38,7 @@ import { DialerService } from './routing/dialer.service';
 import { CallerImportController } from './caller-import/caller-import.controller';
 import { CallerImportService } from './caller-import/caller-import.service';
 import { AppInfoController } from './app-info/app-info.controller';
+import { CallListsController, CallListsService } from './call-lists/call-lists';
 import { SoftphoneController, SoftphoneService } from './softphone/softphone';
 
 export interface AppDeps {
@@ -91,7 +92,7 @@ export function createAppModule(d: AppDeps): DynamicModule {
       ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }]),
     ],
     controllers: [HealthController, AuthController, UsersController, TenantsController, RolesController, TeamsController, PlatformController,
-      ProvidersController, TrunksController, DidsController, ProcessesController, CallServersController, AssignmentsController, CallerImportController, DialerController, SoftphoneController, AppInfoController],
+      ProvidersController, TrunksController, DidsController, ProcessesController, CallServersController, AssignmentsController, CallerImportController, DialerController, SoftphoneController, AppInfoController, CallListsController],
     providers: [
       AuditService,
       OutboxService,
@@ -103,7 +104,7 @@ export function createAppModule(d: AppDeps): DynamicModule {
       PlatformService,
       PlatformAdminGuard,
       SecretsService, ConnectivityService,
-      ProvidersService, TrunksService, DidsService, ProcessesService, CallServersService, AssignmentsService, CallerImportService, DialerService, SoftphoneService,
+      ProvidersService, TrunksService, DidsService, ProcessesService, CallServersService, AssignmentsService, CallerImportService, DialerService, SoftphoneService, CallListsService,
       { provide: TelephonyAdapter, useFactory: (c: ConnectivityService) => d.telephony ?? new AriTelephonyAdapter(c), inject: [ConnectivityService] },
       { provide: APP_GUARD, useClass: ThrottlerGuard },
       { provide: APP_GUARD, useClass: AuthGuard },

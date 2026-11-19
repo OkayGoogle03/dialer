@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Alert, Badge, Button, Card, DataTable, EmptyState } from '@dialer/ui';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import type { CallServerView, Paged, ProcessView, SoftphoneCallView } from '../api/types';
+import type { CallServerView, Paged, SoftphoneCallView } from '../api/types';
 import { errText, statusTone } from '../components/kit';
 
 const ROLE_LABEL: Record<string, string> = {
@@ -39,20 +39,20 @@ export function DashboardPage() {
 /** Checklist for administrators: what still blocks calls from being placed. */
 function SetupCard({ canImport }: { canImport: boolean }) {
   const { can } = useAuth();
-  const [data, setData] = useState<{ servers: CallServerView[]; processes: ProcessView[]; accounts: number | null } | null>(null);
+  const [data, setData] = useState<{ servers: CallServerView[]; lists: number; accounts: number | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     Promise.all([
-      api.get<Paged<CallServerView>>('/call-servers?limit=200'), api.get<Paged<ProcessView>>('/processes?limit=200'),
+      api.get<Paged<CallServerView>>('/call-servers?limit=200'), api.get<{ items: unknown[] }>('/call-lists').then((r) => r.items.length),
       can('call_servers:manage') ? api.get<{ items: unknown[] }>('/softphone-accounts').then((r) => r.items.length) : Promise.resolve(null),
-    ]).then(([s, pr, accounts]) => setData({ servers: s.items, processes: pr.items, accounts })).catch((e) => setError(errText(e, 'Failed to load setup status')));
+    ]).then(([s, pr, accounts]) => setData({ servers: s.items, lists: pr, accounts })).catch((e) => setError(errText(e, 'Failed to load setup status')));
   }, [can]);
   if (error) return <Alert>{error}</Alert>;
   if (!data) return <Card title="Calling setup"><EmptyState>Loading…</EmptyState></Card>;
   const items = [
     { label: 'An active call server with its SIP address (IP or host)', done: data.servers.some((s) => s.status === 'active' && !!s.host), to: '/call-servers', manage: can('call_servers:manage'), detail: `${data.servers.length} servers` },
     { label: 'SIP accounts for your agents', done: (data.accounts ?? 0) > 0, to: '/call-servers', manage: can('call_servers:manage'), detail: data.accounts === null ? 'Visible to administrators' : `${data.accounts} accounts` },
-    { label: 'A process with caller assignments (prefix per call server)', done: data.processes.some((p) => p.callerAssignmentCount > 0), to: canImport ? '/caller-import' : '/processes', manage: canImport || can('processes:manage'), detail: `${data.processes.length} processes` },
+    { label: 'A call list (Excel with call server IP, SIP ID, password, prefix, numbers)', done: data.lists > 0, to: '/call-lists', manage: canImport, detail: `${data.lists} lists` },
   ];
   const ready = items.every((i) => i.done);
   return (

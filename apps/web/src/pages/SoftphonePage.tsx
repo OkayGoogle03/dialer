@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { Alert, Badge, Button, Card, DataTable, PageHeader, SelectField, TextField } from '@dialer/ui';
 import { api } from '../api/client';
 import { Notice } from '../components/kit';
+import type { CallListItem, CallListSummary } from '../api/types';
+import { CallListRows, Counts, exportList, useListItems } from '../components/CallListRows';
 import { useSoftphone } from '../softphone/useSoftphone';
 
 interface LogCall { id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null }
@@ -120,7 +122,49 @@ export function SoftphonePage() {
           <div style={{ marginTop: 8 }}><Button size="small" variant="secondary" onClick={loadLog}>Refresh</Button></div>
         </Card>
       </div>
+      <MyCallList sp={sp} />
       <p className="hint">Browser calling needs your call server to accept WebRTC over secure WebSocket (WSS). Admins can see and edit the server address under <Link to="/call-servers">Call Servers</Link>.</p>
     </>
+  );
+}
+
+/** The agent's Excel call lists: Call (or Call next / auto-dial) with live row status and Excel export. */
+function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
+  const [lists, setLists] = useState<CallListSummary[]>([]);
+  const [listId, setListId] = useState<string | null>(null);
+  const [auto, setAuto] = useState(false);
+  const [kick, setKick] = useState(0);
+  const [msg, setMsg] = useState<string | null>(null);
+  const { data, error } = useListItems(listId, kick);
+
+  useEffect(() => { api.get<{ items: CallListSummary[] }>('/call-lists').then((r) => { setLists(r.items); setListId((c) => c ?? r.items[0]?.id ?? null); }).catch(() => undefined); }, []);
+  const idle = sp.call.state === 'idle';
+  // every call state change refreshes the rows at once; the 2 s poll covers server-side changes
+  useEffect(() => { setKick((k) => k + 1); }, [sp.call.state]);
+
+  const next = data?.items.find((i) => i.status === 'pending');
+  const dial = async (i: CallListItem) => { if (listId) { setMsg(null); await sp.dialItem(listId, i.id); setKick((k) => k + 1); } };
+  // auto-dial: when a call ends and the agent enabled it, start the next pending number after a short pause
+  useEffect(() => {
+    if (!auto || !idle || !next || sp.reg !== 'registered') return;
+    const t = setTimeout(() => void dial(next), 1500);
+    return () => clearTimeout(t);
+  }, [auto, idle, next?.id, sp.reg]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!lists.length) return null;
+  const redial = (i: CallListItem) => ['pending', 'failed', 'not_answered', 'completed'].includes(i.status);
+  return (
+    <Card title="My call list" className="stack">
+      <div className="row">
+        <SelectField label="List" value={listId ?? ''} onChange={(e) => setListId(e.target.value)} options={lists.map((l) => ({ value: l.id, label: l.name }))} />
+        <Button disabled={!idle || !next || sp.reg !== 'registered'} onClick={() => next && void dial(next)}>Call next</Button>
+        <label><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto-dial next</label>
+        <Button variant="secondary" size="small" onClick={() => listId && exportList(listId, setMsg)}>Export Excel</Button>
+      </div>
+      {data && <Counts counts={data.counts} />}
+      {msg && <Alert>{msg}</Alert>}
+      <CallListRows items={data?.items ?? null} error={error}
+        action={(i) => redial(i) ? <Button size="small" variant="secondary" disabled={!idle || sp.reg !== 'registered'} onClick={() => void dial(i)}>{i.status === 'pending' ? 'Call' : 'Redial'}</Button> : null} />
+    </Card>
   );
 }

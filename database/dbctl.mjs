@@ -46,7 +46,7 @@ const API_GRANTS = {
     'dnc_entries', 'campaigns', 'campaign_contacts', 'knowledge_bases', 'knowledge_documents', 'ai_agents',
     'ai_tools', 'ai_sessions', 'idempotency_keys', 'service_providers', 'call_servers', 'provider_dids',
     'outbound_processes', 'process_provider_assignments', 'process_did_assignments', 'process_server_assignments',
-    'caller_import_batches', 'caller_import_records', 'caller_assignments', 'outbound_calls', 'softphone_accounts',
+    'caller_import_batches', 'caller_import_records', 'caller_assignments', 'outbound_calls', 'softphone_accounts', 'call_lists', 'call_list_items',
   ].map((t) => [t, 'SELECT, INSERT, UPDATE, DELETE'])),
 };
 const PLATFORM_OVERRIDES = { audit_logs: 'SELECT, INSERT', schema_migrations: null };
