@@ -3,6 +3,7 @@ import { Alert, Badge, DataTable, DonutChart } from '@dialer/ui';
 import { api, saveBlob } from '../api/client';
 import type { CallListItem } from '../api/types';
 import { errText } from './kit';
+import { selectColumn, type Selection } from './selection';
 
 export const STATUS_LABEL: Record<string, string> = { pending: 'Pending', calling: 'Calling…', ringing: 'Ringing…', answered: 'On call', success: 'Success', not_success: 'Not success', completed: 'Completed', not_answered: 'Not answered', failed: 'Failed', invalid: 'Invalid row' };
 const LIVE = ['calling', 'ringing', 'answered'];
@@ -27,12 +28,16 @@ export async function exportList(listId: string, onError: (m: string) => void) {
   try { const { blob, filename } = await api.download('GET', `/call-lists/${listId}/export`); saveBlob(blob, filename); } catch (e) { onError(errText(e, 'Export failed')); }
 }
 
-export function CallListRows({ items, error, action }: { items: CallListItem[] | null; error: string | null; action?: (i: CallListItem) => ReactNode }) {
+/** Rows that are being called right now cannot be selected for deletion. */
+export const isLive = (i: CallListItem) => LIVE.includes(i.status);
+
+export function CallListRows({ items, error, action, selection }: { items: CallListItem[] | null; error: string | null; action?: (i: CallListItem) => ReactNode; selection?: Selection }) {
   return (
     <>
       {error && <Alert>{error}</Alert>}
       <DataTable rows={items} rowKey={(i) => i.id} empty="No rows."
         columns={[
+          ...(selection ? [selectColumn(items, (i: CallListItem) => i.id, selection, (i) => !isLive(i))] : []),
           { key: 'r', header: '#', render: (i) => i.row },
           { key: 'ip', header: 'Call Server IP', render: (i) => i.serverHost ?? '' },
           { key: 'sid', header: 'SIP ID', render: (i) => i.sipId ?? '' },

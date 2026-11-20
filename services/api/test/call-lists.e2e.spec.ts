@@ -167,6 +167,25 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     await t.http.get('/api/v1/call-lists/dashboard?days=500').set(bearer(a)).expect(400);
   });
 
+  it('bulk delete: rows of a list and whole lists, scoped to what the caller can see', async () => {
+    const body = await getItems(ag1);
+    const invalid = body.items.filter((i: { status: string }) => i.status === 'invalid').map((i: { id: string }) => i.id);
+    expect(invalid).toHaveLength(3);
+    await t.http.post(`/api/v1/call-lists/${listId}/items/delete`).set(bearer(ag1)).send({ ids: [] }).expect(400);
+    await t.http.post(`/api/v1/call-lists/${listId}/items/delete`).set(bearer(b)).send({ ids: invalid }).expect(404); // another tenant
+    const res = (await t.http.post(`/api/v1/call-lists/${listId}/items/delete`).set(bearer(ag1)).send({ ids: [...invalid, '11111111-1111-4111-8111-111111111111'] }).expect(200)).body;
+    expect(res).toEqual({ deleted: 3, skipped: 0, missing: 1 });
+    const after = await getItems(ag1);
+    expect(after.items).toHaveLength(2);
+    expect(after.counts).toEqual({ success: 1, not_success: 1 });
+    expect((await t.http.get('/api/v1/call-lists').set(bearer(ag1)).expect(200)).body.items[0]).toMatchObject({ total: 2, invalid: 0 });
+
+    const second = (await upload(a, await makeWorkbook([['10.20.30.40', '2001', 'excel-sip-secret-1', '91', '9876543299']], LIST_HEADERS), `?userId=${ag1Id}&name=Second`).expect(201)).body.id;
+    expect((await t.http.post('/api/v1/call-lists/delete').set(bearer(b)).send({ ids: [second, listId] }).expect(200)).body).toEqual({ deleted: 0, missing: 2 });
+    expect((await t.http.post('/api/v1/call-lists/delete').set(bearer(a)).send({ ids: [second, '11111111-1111-4111-8111-111111111111'] }).expect(200)).body).toEqual({ deleted: 1, missing: 1 });
+    expect((await t.http.get('/api/v1/call-lists').set(bearer(a)).expect(200)).body.items).toHaveLength(1);
+  });
+
   it('deleting a list removes its rows', async () => {
     await t.http.delete(`/api/v1/call-lists/${listId}`).set(bearer(b)).expect(404);
     await t.http.delete(`/api/v1/call-lists/${listId}`).set(bearer(a)).expect(204);

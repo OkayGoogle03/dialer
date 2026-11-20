@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthContext';
 import type { CallListSummary, Paged } from '../api/types';
 import { errText, Notice } from '../components/kit';
 import { CallListRows, Counts, exportList, useListItems } from '../components/CallListRows';
+import { BulkBar, selectColumn, useSelection } from '../components/selection';
 
 interface ImportResult { id: string; total: number; valid: number; invalid: number; createdServers: number; errors: { row: number; message: string }[] }
 
@@ -21,6 +22,19 @@ export function CallListsPage() {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const sel = useSelection();
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  async function deleteSelected() {
+    const ids = [...sel.selected];
+    if (!window.confirm(`Delete ${ids.length} call list${ids.length === 1 ? '' : 's'} and their results? This cannot be undone.`)) return;
+    setBulkBusy(true); setError(null);
+    try {
+      await api.post('/call-lists/delete', { ids });
+      if (open && ids.includes(open)) setOpen(null);
+      sel.clear(); await load();
+    } catch (e) { setError(errText(e, 'Delete failed')); } finally { setBulkBusy(false); }
+  }
 
   const load = useCallback(async () => { try { setLists((await api.get<{ items: CallListSummary[] }>('/call-lists')).items); } catch (e) { setError(errText(e, 'Failed to load lists')); } }, []);
   useEffect(() => { void load(); const t = setInterval(() => void load(), 5000); return () => clearInterval(t); }, [load]);
@@ -61,8 +75,10 @@ export function CallListsPage() {
         )}
       </Card>
       <Card title="Lists" className="stack">
+        <BulkBar count={sel.selected.size} noun="list" busy={bulkBusy} onDelete={deleteSelected} onClear={sel.clear} />
         <DataTable rows={lists} rowKey={(l) => l.id} empty="No call lists yet."
           columns={[
+            selectColumn(lists, (l: CallListSummary) => l.id, sel),
             { key: 'n', header: 'List', render: (l) => <><strong>{l.name}</strong><div className="hint">{new Date(l.createdAt).toLocaleString()}</div></> },
             { key: 'pn', header: 'Process', render: (l) => (l.processNames.length ? l.processNames.join(', ') : '—') },
             { key: 'a', header: 'Agent', render: (l) => l.agentName },
@@ -82,6 +98,27 @@ export function CallListsPage() {
 }
 
 function Rows({ id }: { id: string }) {
-  const { data, error } = useListItems(id);
-  return <Card title="Rows (live)" className="stack"><CallListRows items={data?.items ?? null} error={error} /></Card>;
+  const [kick, setKick] = useState(0);
+  const { data, error } = useListItems(id, kick);
+  const sel = useSelection();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => { sel.clear(); setMsg(null); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function deleteSelected() {
+    const ids = [...sel.selected];
+    if (!window.confirm(`Delete ${ids.length} row${ids.length === 1 ? '' : 's'} from this list? This cannot be undone.`)) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.post<{ deleted: number; skipped: number }>(`/call-lists/${id}/items/delete`, { ids });
+      setMsg(`Deleted ${r.deleted} row${r.deleted === 1 ? '' : 's'}${r.skipped ? `; ${r.skipped} skipped because they are being called now` : ''}.`);
+      sel.clear(); setKick((k) => k + 1);
+    } catch (e) { setMsg(errText(e, 'Delete failed')); } finally { setBusy(false); }
+  }
+  return (
+    <Card title="Rows (live)" className="stack">
+      <BulkBar count={sel.selected.size} noun="row" busy={busy} onDelete={deleteSelected} onClear={sel.clear} />
+      {msg && <Alert tone="success">{msg}</Alert>}
+      <CallListRows items={data?.items ?? null} error={error} selection={sel} />
+    </Card>
+  );
 }

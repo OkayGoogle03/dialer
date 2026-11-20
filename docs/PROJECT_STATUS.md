@@ -135,3 +135,8 @@ Outbound calls are cancelled after `RING_TIMEOUT_SECONDS` (config file: 5) of ri
 ## Layout polish and desktop 0.2.4
 - Light cream theme only (no automatic dark mode). Call Lists upload form in one row; Softphone: narrower Phone card, call-list controls in one row with the results chart on the right; consistent gaps between all cards.
 - Desktop 0.2.4: bundled server-address page also light-only; installer rebuilt (unsigned). SIP engine unchanged (7 engine tests pass). Web production build, lint and typecheck pass. The installer was not launched.
+
+## Bulk delete
+- Checkbox selection with a "Delete selected" bar on: Call Servers (servers), Call Lists (lists, and the live Rows card), Softphone My call list (rows). Select-all in the header; rows being called right now cannot be ticked.
+- API: `POST /call-lists/delete {ids}` (whole lists) and `POST /call-lists/:id/items/delete {ids}` (rows; live rows skipped, list totals recalculated); both scoped to what the caller may see and audited. Call servers reuse the existing single delete, one by one from the screen; a server that cannot be deleted is listed and the rest still go.
+- Verified: call-lists API suite (8 tests incl. bulk delete and tenant isolation, TiDB); in the browser, bulk-deleting rows (8 to 6) and servers (3 to 1) worked. Bulk list delete was covered by the API test only, not clicked in the UI.

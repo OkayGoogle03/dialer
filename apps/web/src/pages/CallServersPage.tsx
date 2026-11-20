@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import type { CallServerView, Paged, SipAccountView } from '../api/types';
 import type { UserView } from '../api/client';
 import { ConfigForm, errText, Notice, statusTone, useList } from '../components/kit';
+import { BulkBar, selectColumn, useSelection } from '../components/selection';
 
 const TRANSPORTS = [
   { value: 'wss', label: 'WSS - secure WebSocket (browser softphone)' },
@@ -29,6 +30,21 @@ export function CallServersPage() {
   const { items, error, reload, setError } = useList<CallServerView>('/call-servers?limit=200');
   const [form, setForm] = useState<'new' | CallServerView | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const sel = useSelection();
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  /** Deletes the ticked call servers one by one; a server that cannot be deleted (for example it has call history) is reported and the rest still go. */
+  async function deleteSelected() {
+    const ids = [...sel.selected];
+    if (!window.confirm(`Delete ${ids.length} call server${ids.length === 1 ? '' : 's'}? Their dial prefixes and the agents' SIP accounts on them are deleted too.`)) return;
+    setBulkBusy(true); setMsg(null);
+    const failed: string[] = [];
+    for (const id of ids) {
+      try { await api.delete(`/call-servers/${id}`); } catch (e) { failed.push(`${items?.find((s) => s.id === id)?.name ?? id}: ${errText(e, 'failed')}`); }
+    }
+    sel.clear(); await reload(); setBulkBusy(false);
+    setMsg(failed.length ? { ok: false, text: `Deleted ${ids.length - failed.length} of ${ids.length}. Not deleted - ${failed.join('; ')}` } : { ok: true, text: `Deleted ${ids.length} call server${ids.length === 1 ? '' : 's'}.` });
+  }
 
   async function act(fn: () => Promise<unknown>) {
     setMsg(null);
@@ -45,8 +61,10 @@ export function CallServersPage() {
       {form && <ConfigForm title={form === 'new' ? 'New call server' : `Edit ${form.name}`} fields={fields} initial={form === 'new' ? { sipTransport: 'wss', sipWsPath: '/ws' } : (form as unknown as Record<string, unknown>)}
         submitLabel="Save call server" onCancel={() => setForm(null)}
         onSubmit={async (v) => { if (form === 'new') await api.post('/call-servers', v); else await api.put(`/call-servers/${form.id}`, v); setForm(null); await reload(); }} />}
+      {manage && <BulkBar count={sel.selected.size} noun="call server" busy={bulkBusy} onDelete={deleteSelected} onClear={sel.clear} />}
       <DataTable rows={items} error={error} rowKey={(s) => s.id} empty="No call servers yet. Add one, or import caller assignments to propose them."
         columns={[
+          ...(manage ? [selectColumn(items, (s: CallServerView) => s.id, sel)] : []),
           { key: 'n', header: 'Server', render: (s) => <><strong>{s.name}</strong><div className="hint">{s.webrtcUrl ?? (s.host ? `${s.sipTransport}://${s.host}${s.port ? `:${s.port}` : ''}` : 'SIP address not set')}</div></> },
           { key: 'u', header: 'Address updated', render: (s) => (s.addressUpdatedAt ? new Date(s.addressUpdatedAt).toLocaleString() : '—') },
           { key: 's', header: 'Status', render: (s) => <Badge tone={statusTone(s.status)}>{s.status.replace('_', ' ')}</Badge> },
@@ -70,12 +88,28 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
   const [users, setUsers] = useState<UserView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<'new' | SipAccountView | null>(null);
+  const sel = useSelection();
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = useCallback(async () => {
     try { setAccounts((await api.get<{ items: SipAccountView[] }>('/softphone-accounts')).items); setError(null); } catch (e) { setError(errText(e, 'Failed to load SIP accounts')); }
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { api.get<Paged<UserView>>('/users?limit=100').then((r) => setUsers(r.items)).catch(() => setUsers([])); }, []);
+
+  /** Removes the ticked SIP accounts one by one; failures are listed and the rest still go. */
+  async function deleteSelected() {
+    const ids = [...sel.selected];
+    if (!window.confirm(`Remove ${ids.length} SIP account${ids.length === 1 ? '' : 's'}? The agents' softphones stop registering with them.`)) return;
+    setBulkBusy(true); setNotice(null);
+    const failed: string[] = [];
+    for (const id of ids) {
+      try { await api.delete(`/softphone-accounts/${id}`); } catch (e) { failed.push(`${accounts?.find((a) => a.id === id)?.sipId ?? id}: ${errText(e, 'failed')}`); }
+    }
+    sel.clear(); await load(); setBulkBusy(false);
+    setNotice(failed.length ? { ok: false, text: `Removed ${ids.length - failed.length} of ${ids.length}. Not removed - ${failed.join('; ')}` } : { ok: true, text: `Removed ${ids.length} SIP account${ids.length === 1 ? '' : 's'}.` });
+  }
 
   const fieldsNew = [
     { name: 'userId', label: 'Agent', type: 'select' as const, options: [{ value: '', label: 'Select an agent…' }, ...users.map((u) => ({ value: u.id, label: `${u.displayName} (${u.email})` }))] },
@@ -95,6 +129,8 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
     <Card title="SIP accounts (agent softphones)" className="stack">
       <div className="row"><Button size="small" onClick={() => setForm(form ? null : 'new')} disabled={!servers.length}>{form ? 'Close' : 'Add SIP account'}</Button>{!servers.length && <span className="hint">Add a call server first.</span>}</div>
       {error && <Alert>{error}</Alert>}
+      {notice && <Alert tone={notice.ok ? 'success' : 'error'}>{notice.text}</Alert>}
+      <BulkBar count={sel.selected.size} noun="SIP account" busy={bulkBusy} onDelete={deleteSelected} onClear={sel.clear} />
       {form && (
         <ConfigForm title={form === 'new' ? 'New SIP account' : `Edit ${form.sipId}`} fields={form === 'new' ? fieldsNew : fieldsEdit} initial={form === 'new' ? {} : (form as unknown as Record<string, unknown>)}
           submitLabel="Save SIP account" onCancel={() => setForm(null)}
@@ -105,6 +141,7 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
       )}
       <DataTable rows={accounts} rowKey={(a) => a.id} empty="No SIP accounts yet. Add one per agent."
         columns={[
+          selectColumn(accounts, (a: SipAccountView) => a.id, sel),
           { key: 'u', header: 'Agent', render: (a) => <>{a.userName}<div className="hint">{a.userEmail}</div></> },
           { key: 'i', header: 'SIP ID @ server', render: (a) => <>{a.sipId}<div className="hint">{a.callServerName}</div></> },
           { key: 'r', header: 'Registration', render: (a) => <><Badge tone={a.registrationStatus === 'registered' ? 'ok' : a.registrationStatus === 'failed' ? 'off' : undefined}>{a.registrationStatus}</Badge>{a.lastError && <div className="hint">{a.lastError}</div>}{a.lastSeenAt && <div className="hint">seen {new Date(a.lastSeenAt).toLocaleString()}</div>}</> },

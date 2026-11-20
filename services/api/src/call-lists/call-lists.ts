@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Delete, ForbiddenException, Get, HttpCode, Injectable, NotFoundException, Param, ParseUUIDPipe, Post, Query, Res, StreamableFile, UploadedFile, UseInterceptors, ConflictException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, Injectable, NotFoundException, Param, ParseUUIDPipe, Post, Query, Res, StreamableFile, UploadedFile, UseInterceptors, ConflictException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -29,6 +29,7 @@ const PHONE_RE = /^\+?[0-9]{3,20}$/;
 
 const itemsQuery = z.object({ limit: z.coerce.number().int().min(1).max(500).default(200), offset: z.coerce.number().int().min(0).default(0), status: z.string().max(16).optional() }).strict();
 const dashQuery = z.object({ days: z.coerce.number().int().min(1).max(90).default(14) }).strict();
+const idsBody = z.object({ ids: z.array(uuidSchema).min(1).max(500) }).strict();
 const listQuery = z.object({ userId: uuidSchema.optional() }).strict();
 
 /** Cells that Excel would read as a formula are neutralised in the export. */
@@ -271,6 +272,38 @@ export class CallListsService {
     });
   }
 
+  /** Bulk delete of whole lists (their rows go with them). Lists the caller cannot see are reported as missing, not deleted. */
+  removeMany(actor: AuthUser, ids: string[], ctx: RequestContext) {
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      let deleted = 0;
+      for (const id of [...new Set(ids)]) {
+        let l;
+        try { l = await this.loadList(tx, actor, id); } catch { continue; }
+        await tx.execute(`DELETE FROM call_lists WHERE tenant_id = :tenantId AND id = :id`, { id });
+        await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_list.deleted', entityType: 'call_list', entityId: id, metadata: { name: l.name, bulk: true } }, ctx);
+        deleted++;
+      }
+      return { deleted, missing: new Set(ids).size - deleted };
+    });
+  }
+
+  /** Bulk delete of rows of one list. Rows that are being called right now are kept (reported as skipped). */
+  removeItems(actor: AuthUser, listId: string, ids: string[], ctx: RequestContext) {
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      await this.loadList(tx, actor, listId);
+      const unique = [...new Set(ids)];
+      const rows = await tx.query<{ id: string; status: string }>(`SELECT id, status FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid AND id IN (:ids) FOR UPDATE`, { lid: listId, ids: unique });
+      const deletable = rows.filter((r) => !['calling', 'ringing', 'answered'].includes(r.status)).map((r) => r.id);
+      if (deletable.length) {
+        await tx.execute(`DELETE FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid AND id IN (:ids)`, { lid: listId, ids: deletable });
+        const [c] = await tx.query<{ total: number; invalid: number }>(`SELECT COUNT(*) AS total, COALESCE(SUM(status = 'invalid'), 0) AS invalid FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid`, { lid: listId });
+        await tx.execute(`UPDATE call_lists SET total_rows = :t, invalid_rows = :i WHERE tenant_id = :tenantId AND id = :lid`, { t: Number(c?.total ?? 0), i: Number(c?.invalid ?? 0), lid: listId });
+        await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_list.rows_deleted', entityType: 'call_list', entityId: listId, metadata: { rows: deletable.length } }, ctx);
+      }
+      return { deleted: deletable.length, skipped: rows.length - deletable.length, missing: unique.length - rows.length };
+    });
+  }
+
   /** Excel export of every row with its outcome. SIP passwords are never included. */
   async export(actor: AuthUser, id: string) {
     const { list, rows } = await this.db.withTenant(actor.tenantId, async (tx) => ({
@@ -340,6 +373,12 @@ export class CallListsController {
 
   @Post(':id/items/:itemId/call') @HttpCode(201) @Throttle({ default: { limit: 120, ttl: 60_000 } })
   call(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @ReqContext() ctx: RequestContext) { return this.svc.call(u, id, itemId, ctx); }
+
+  @Post('delete') @HttpCode(200)
+  removeMany(@CurrentUser() u: AuthUser, @Body(new ZodPipe(idsBody)) b: z.infer<typeof idsBody>, @ReqContext() ctx: RequestContext) { return this.svc.removeMany(u, b.ids, ctx); }
+
+  @Post(':id/items/delete') @HttpCode(200)
+  removeItems(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(idsBody)) b: z.infer<typeof idsBody>, @ReqContext() ctx: RequestContext) { return this.svc.removeItems(u, id, b.ids, ctx); }
 
   @Get(':id/export')
   async export(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Res({ passthrough: true }) res: Response) {

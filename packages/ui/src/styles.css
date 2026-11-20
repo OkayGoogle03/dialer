@@ -268,3 +268,6 @@ input[type='file']::file-selector-button { font: inherit; font-weight: 600; marg
 .card.sp-list { margin-top: var(--space-6); }
 * + .dash { margin-top: var(--space-4); }
 .list-bar > .inline-form { flex: 1 1 600px; flex-wrap: nowrap; } .list-chart { flex: none; } @media (max-width: 760px) { .list-bar > .inline-form { flex-wrap: wrap; } }
+
+.bulk-bar { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; padding: 8px 14px; border-radius: 999px; background: color-mix(in srgb, var(--brand-primary) 12%, var(--surface)); box-shadow: var(--shadow-inset); }
+th input[type='checkbox'], td input[type='checkbox'] { vertical-align: middle; }

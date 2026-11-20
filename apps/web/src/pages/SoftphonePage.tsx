@@ -2,10 +2,11 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { Link } from 'react-router-dom';
 import { Alert, Badge, Button, Card, DataTable, PageHeader, SelectField, TextField } from '@dialer/ui';
 import { api } from '../api/client';
-import { Notice } from '../components/kit';
+import { Notice, errText } from '../components/kit';
 import type { CallListItem, CallListSummary } from '../api/types';
 import { CallListRows, ResultDonut, exportList, useListItems } from '../components/CallListRows';
 import { useSoftphone } from '../softphone/useSoftphone';
+import { BulkBar, useSelection } from '../components/selection';
 
 interface LogCall { processName?: string | null; id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null }
 
@@ -138,6 +139,9 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
   const [queue, setQueue] = useState<string[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const { data, error } = useListItems(listId, kick);
+  const sel = useSelection();
+  const [bulkBusy, setBulkBusy] = useState(false);
+  useEffect(() => { sel.clear(); }, [listId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lists are re-read every few seconds and on focus, so a list an admin uploaded later shows up without reloading the page.
   // When the selected list has nothing left to dial and a newer list has pending rows, switch to it (this is what Auto-dial needs on a second run).
@@ -184,6 +188,17 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
     setQueue(auto ? (data?.items ?? []).filter((x) => x.row > i.row && redial(x)).map((x) => x.id) : []);
     void dial(i);
   };
+  async function deleteSelected() {
+    const ids = [...sel.selected];
+    if (!listId || !window.confirm(`Delete ${ids.length} row${ids.length === 1 ? '' : 's'} from this list? This cannot be undone.`)) return;
+    setBulkBusy(true); setMsg(null);
+    try {
+      const r = await api.post<{ deleted: number; skipped: number }>(`/call-lists/${listId}/items/delete`, { ids });
+      setQueue((q) => q.filter((x) => !ids.includes(x)));
+      setMsg(`Deleted ${r.deleted} row${r.deleted === 1 ? '' : 's'}${r.skipped ? `; ${r.skipped} skipped because they are being called now` : ''}.`);
+      sel.clear(); setKick((k) => k + 1);
+    } catch (e) { setMsg(errText(e, 'Delete failed')); } finally { setBulkBusy(false); }
+  }
   const redial = (i: CallListItem) => ['pending', 'success', 'not_success', 'failed', 'not_answered', 'completed'].includes(i.status);
   return (
     <Card title="My call list" className="stack sp-list">
@@ -198,8 +213,9 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
         </div>
         {data && <div className="list-chart"><ResultDonut counts={data.counts} /></div>}
       </div>
+      <BulkBar count={sel.selected.size} noun="row" busy={bulkBusy} onDelete={deleteSelected} onClear={sel.clear} />
       {msg && <Alert>{msg}</Alert>}
-      <CallListRows items={data?.items ?? null} error={error}
+      <CallListRows items={data?.items ?? null} error={error} selection={sel}
         action={(i) => redial(i) ? <Button size="small" variant="secondary" disabled={!idle || sp.reg === 'idle'} onClick={() => startRedial(i)}>{i.status === 'pending' ? 'Call' : 'Redial'}</Button> : null} />
     </Card>
   );
