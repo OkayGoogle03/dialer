@@ -131,3 +131,7 @@ Outbound calls are cancelled after `RING_TIMEOUT_SECONDS` (config file: 5) of ri
 
 ## Desktop 0.2.3: same skeuomorphic UI
 - The desktop app loads the hosted web app, so it shows the redesigned UI (floating nav, dashboard charts) as soon as the server is deployed. The bundled server-address page was restyled to match, and the window now opens at 1200x800 (full layout) with a warm background; it still shrinks to the phone layout when narrow. Installer rebuilt (unsigned, ~81.7 MB) and served at `/downloads/Project-Dialer-Setup.exe`. SIP engine unchanged (engine tests re-run). The restyled settings page and the installer were not launched/clicked through.
+
+## Layout polish and desktop 0.2.4
+- Light cream theme only (no automatic dark mode). Call Lists upload form in one row; Softphone: narrower Phone card, call-list controls in one row with the results chart on the right; consistent gaps between all cards.
+- Desktop 0.2.4: bundled server-address page also light-only; installer rebuilt (unsigned). SIP engine unchanged (7 engine tests pass). Web production build, lint and typecheck pass. The installer was not launched.

@@ -187,13 +187,17 @@ function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
   const redial = (i: CallListItem) => ['pending', 'success', 'not_success', 'failed', 'not_answered', 'completed'].includes(i.status);
   return (
     <Card title="My call list" className="stack sp-list">
-      <div className="row">
-        <SelectField label="List" value={listId ?? ''} onChange={(e) => setListId(e.target.value)} options={lists.map((l) => ({ value: l.id, label: l.name }))} />
-        <Button disabled={!idle || !next || sp.reg === 'idle'} onClick={() => next && void dial(next)}>Call next</Button>
-        <label><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto-dial next</label>
-        <Button variant="secondary" size="small" onClick={() => listId && exportList(listId, setMsg)}>Export Excel</Button>
+      <div className="list-bar">
+        <div className="inline-form">
+          <SelectField label="List" value={listId ?? ''} onChange={(e) => setListId(e.target.value)} options={lists.map((l) => ({ value: l.id, label: l.name }))} />
+          <div className="row inline-actions">
+            <Button disabled={!idle || !next || sp.reg === 'idle'} onClick={() => next && void dial(next)}>Call next</Button>
+            <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto-dial next</label>
+            <Button variant="secondary" size="small" onClick={() => listId && exportList(listId, setMsg)}>Export Excel</Button>
+          </div>
+        </div>
+        {data && <div className="list-chart"><ResultDonut counts={data.counts} /></div>}
       </div>
-      {data && <ResultDonut counts={data.counts} />}
       {msg && <Alert>{msg}</Alert>}
       <CallListRows items={data?.items ?? null} error={error}
         action={(i) => redial(i) ? <Button size="small" variant="secondary" disabled={!idle || sp.reg === 'idle'} onClick={() => startRedial(i)}>{i.status === 'pending' ? 'Call' : 'Redial'}</Button> : null} />

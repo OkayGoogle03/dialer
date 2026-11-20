@@ -44,11 +44,11 @@ export function CallListsPage() {
       </Notice>
       {error && <Alert>{error}</Alert>}
       <Card title="Upload" className="stack">
-        <div style={{ maxWidth: 480 }}>
-          <SelectField label="Agent (whose softphone uses these SIP details)" value={agent} onChange={(e) => setAgent(e.target.value)} options={agents.map((u) => ({ value: u.id, label: `${u.displayName} (${u.email})` }))} />
+        <div className="inline-form">
+          <SelectField label="Agent (softphone user)" value={agent} onChange={(e) => setAgent(e.target.value)} options={agents.map((u) => ({ value: u.id, label: `${u.displayName} (${u.email})` }))} />
           <TextField label="List name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
           <div className="field"><label>Excel file (.xlsx)<input type="file" accept=".xlsx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></label></div>
-          <div className="row">
+          <div className="row inline-actions">
             <Button busy={busy} disabled={!file || !agent} onClick={submit}>Upload and import</Button>
             <Button variant="secondary" onClick={() => api.download('GET', '/call-lists/template').then(({ blob, filename }) => saveBlob(blob, filename)).catch((e) => setError(errText(e, 'Download failed')))}>Download template</Button>
           </div>

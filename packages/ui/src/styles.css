@@ -241,6 +241,8 @@ input[type='file']::file-selector-button { font: inherit; font-weight: 600; marg
 
 /* ---------- softphone: equal-height cards, scrolling call history without a visible scrollbar, iPhone-style dial pad */
 .sp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; align-items: stretch; }
+/* side by side: a narrower phone card, the call history takes the rest */
+@media (min-width: 1000px) { .sp-grid { grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); } }
 .sp-grid > .card { margin-top: 0; }
 .sp-calls { display: flex; flex-direction: column; min-height: 0; max-height: 520px; }
 .sp-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
@@ -250,3 +252,19 @@ input[type='file']::file-selector-button { font: inherit; font-weight: 600; marg
 /* side by side: the history never makes the row taller, so both cards share the phone card's height */
 @media (min-width: 1000px) { .sp-calls { contain: size; max-height: none; } }
 .sp-list { margin-top: var(--space-6); }
+
+/* ---------- one-row forms and list bar */
+.inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3) var(--space-4); }
+.inline-form .field { margin-bottom: 0; min-width: 170px; flex: 0 1 260px; }
+.inline-form .field select { max-width: 100%; }
+.inline-form .field input[type='file'] { padding: 6px 8px; }
+.inline-actions { gap: var(--space-3); }
+.list-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.list-chart { margin-left: auto; }
+
+/* ---------- spacing between stacked blocks: any card that follows another block gets a gap (grid / flex parents use their own gap) */
+.card:not(:first-child) { margin-top: var(--space-4); }
+.stack > .card, .dash > .card, .dash-main > .card, .dash-two > .card, .sp-grid > .card, .grid > .card, .row > .card { margin-top: 0; }
+.card.sp-list { margin-top: var(--space-6); }
+* + .dash { margin-top: var(--space-4); }
+.list-bar > .inline-form { flex: 1 1 600px; flex-wrap: nowrap; } .list-chart { flex: none; } @media (max-width: 760px) { .list-bar > .inline-form { flex-wrap: wrap; } }
