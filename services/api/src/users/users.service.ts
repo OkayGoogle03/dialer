@@ -118,7 +118,7 @@ export class UsersService {
     const out = new Map<string, string[]>();
     if (!userIds.length) return out;
     const rows = await tx.query<{ user_id: string; key: string }>(
-      `SELECT ur.user_id, r.\`key\` FROM user_roles ur JOIN roles r ON r.id = ur.role_id AND r.tenant_id = :tenantId
+      `SELECT ur.user_id, r.\`key\` FROM user_roles ur JOIN roles r ON r.id = ur.role_id AND r.tenant_id = :tenantId AND r.record_status = 1
         WHERE ur.tenant_id = :tenantId AND ur.user_id IN (:ids) ORDER BY r.\`key\``, { ids: userIds });
     for (const r of rows) out.set(r.user_id, [...(out.get(r.user_id) ?? []), r.key]);
     return out;

@@ -179,6 +179,10 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     expect(after.items).toHaveLength(2);
     expect(after.counts).toEqual({ success: 1, not_success: 1 });
     expect((await t.http.get('/api/v1/call-lists').set(bearer(ag1)).expect(200)).body.items[0]).toMatchObject({ total: 2, invalid: 0 });
+    const oc = await ownerConnection();
+    const [kept] = await oc.query(`SELECT COUNT(*) AS n FROM call_list_items WHERE list_id = ? AND record_status = 0 AND deleted_at IS NOT NULL`, [listId]);
+    await oc.end();
+    expect(Number((kept as { n: number }[])[0].n)).toBe(3); // soft deleted, not removed
 
     const second = (await upload(a, await makeWorkbook([['10.20.30.40', '2001', 'excel-sip-secret-1', '91', '9876543299']], LIST_HEADERS), `?userId=${ag1Id}&name=Second`).expect(201)).body.id;
     expect((await t.http.post('/api/v1/call-lists/delete').set(bearer(b)).send({ ids: [second, listId] }).expect(200)).body).toEqual({ deleted: 0, missing: 2 });
@@ -186,13 +190,22 @@ describe('Excel call lists: dynamic call server / SIP account / prefix / numbers
     expect((await t.http.get('/api/v1/call-lists').set(bearer(a)).expect(200)).body.items).toHaveLength(1);
   });
 
-  it('deleting a list removes its rows', async () => {
+  it('deleting a list is a soft delete: hidden everywhere, kept in the tables with record_status 0', async () => {
     await t.http.delete(`/api/v1/call-lists/${listId}`).set(bearer(b)).expect(404);
     await t.http.delete(`/api/v1/call-lists/${listId}`).set(bearer(a)).expect(204);
     expect((await t.http.get('/api/v1/call-lists').set(bearer(a)).expect(200)).body.items).toHaveLength(0);
     const c = await ownerConnection();
-    const [r] = await c.query(`SELECT COUNT(*) AS n FROM call_list_items WHERE list_id = ?`, [listId]);
+    const [r] = await c.query(`SELECT COUNT(*) AS n, SUM(record_status = 0) AS gone FROM call_list_items WHERE list_id = ?`, [listId]);
+    const [l] = await c.query(`SELECT record_status, deleted_at FROM call_lists WHERE id = ?`, [listId]);
     await c.end();
-    expect(Number((r as { n: number }[])[0].n)).toBe(0);
+    const row = (r as { n: number; gone: number }[])[0];
+    expect(Number(row.n)).toBe(5); // all 5 rows are still in the table
+    expect(Number(row.gone)).toBe(5);
+    expect((l as { record_status: number; deleted_at: Date | null }[])[0]).toMatchObject({ record_status: 0 });
+    expect((l as { deleted_at: Date | null }[])[0].deleted_at).not.toBeNull();
+    // a deleted list cannot be opened, exported or called, and no longer counts on the dashboard
+    await t.http.get(`/api/v1/call-lists/${listId}/items`).set(bearer(a)).expect(404);
+    await t.http.get(`/api/v1/call-lists/${listId}/export`).set(bearer(a)).expect(404);
+    expect((await t.http.get('/api/v1/call-lists/dashboard').set(bearer(a)).expect(200)).body.counts).toEqual({});
   });
 });

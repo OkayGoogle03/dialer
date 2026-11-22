@@ -1,21 +1,10 @@
 /** Response shapes of the /api/v1 REST API shared by web, desktop and tests. */
 
-export interface ApiErrorBody {
-  error: { status: number; code: string; message: string; details?: unknown; correlationId?: string };
-}
-
 export interface Page<T> {
   items: T[];
   total: number;
   limit: number;
   offset: number;
-}
-
-export interface TokenResponse {
-  accessToken: string;
-  accessTokenExpiresIn: number;
-  refreshToken?: string;
-  refreshTokenExpiresAt: string;
 }
 
 export interface Branding {

@@ -1,0 +1,3 @@
+# Shell scripts run on Linux servers: a Windows checkout must never turn them into CRLF files (sh then fails with "command not found" errors).
+*.sh text eol=lf
+ops/** text eol=lf

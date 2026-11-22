@@ -23,16 +23,11 @@ export const newId = () => randomUUID();
  */
 export const TENANT_TABLES = new Set([
   'tenants', 'tenant_branding', 'roles', 'role_permissions', 'teams', 'users', 'platform_admins', 'user_roles',
-  'refresh_tokens', 'audit_logs', 'tenant_sip_providers', 'caller_ids', 'extensions', 'queues', 'queue_agents',
-  'call_dispositions', 'call_sessions', 'call_legs', 'call_events', 'recordings', 'contact_lists', 'contacts',
-  'dnc_entries', 'consent_records', 'campaigns', 'campaign_contacts', 'knowledge_bases', 'knowledge_documents',
-  'ai_agents', 'ai_tools', 'ai_agent_tools', 'ai_sessions', 'ai_transcripts', 'subscriptions', 'usage_records',
-  'invoices', 'outbox_events', 'idempotency_keys', 'service_providers', 'call_servers', 'provider_dids',
-  'outbound_processes', 'process_provider_assignments', 'process_did_assignments', 'process_server_assignments',
-  'caller_import_batches', 'caller_import_records', 'caller_assignments', 'outbound_calls', 'softphone_accounts', 'call_lists', 'call_list_items',
+  'refresh_tokens', 'audit_logs', 'tenant_sip_providers', 'call_sessions', 'subscriptions', 'outbox_events',
+  'service_providers', 'call_servers', 'provider_dids', 'outbound_processes', 'process_provider_assignments',
+  'process_did_assignments', 'process_server_assignments', 'caller_import_batches', 'caller_import_records',
+  'caller_assignments', 'outbound_calls', 'softphone_accounts', 'call_lists', 'call_list_items',
 ]);
-/** Shared catalogue tables readable without tenant scope. */
-export const GLOBAL_TABLES = new Set(['permissions', 'plans', 'sip_providers']);
 
 export class TenantScopeError extends Error {}
 

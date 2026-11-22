@@ -12,3 +12,6 @@ apps/desktop/release/
 apps/desktop/release-*/
 apps/desktop/release-check/
 apps/desktop/release-0.2.2/
+
+# build caches
+*.tsbuildinfo

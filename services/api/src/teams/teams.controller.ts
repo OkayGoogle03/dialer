@@ -84,7 +84,7 @@ export class TeamsService {
         if (found.length !== unique.length) throw new BadRequestException('One or more users not found');
       }
       await tx.execute(`UPDATE users SET team_id = NULL WHERE tenant_id = :tenantId AND team_id = :id`, { id });
-      if (unique.length) await tx.execute(`UPDATE users SET team_id = :id WHERE tenant_id = :tenantId AND id IN (:ids)`, { id, ids: unique });
+      if (unique.length) await tx.execute(`UPDATE users SET team_id = :id WHERE tenant_id = :tenantId AND record_status = 1 AND id IN (:ids)`, { id, ids: unique });
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'team.members_set', entityType: 'team', entityId: id, metadata: { count: unique.length } }, ctx);
       return this.load(tx, id);
     });

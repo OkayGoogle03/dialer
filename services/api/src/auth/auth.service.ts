@@ -141,7 +141,7 @@ export class AuthService {
 
   private async issueTokens(tx: SqlRunner, tenantId: string, userId: string, familyId: string, ctx: RequestContext): Promise<TokenPair> {
     const roles = await tx.query<{ key: string }>(
-      `SELECT r.\`key\` FROM user_roles ur JOIN roles r ON r.id = ur.role_id AND r.tenant_id = :tenantId
+      `SELECT r.\`key\` FROM user_roles ur JOIN roles r ON r.id = ur.role_id AND r.tenant_id = :tenantId AND r.record_status = 1
         WHERE ur.tenant_id = :tenantId AND ur.user_id = :uid ORDER BY r.\`key\``,
       { uid: userId },
     );

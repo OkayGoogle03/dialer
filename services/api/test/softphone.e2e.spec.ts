@@ -65,6 +65,8 @@ describe('Softphone: call server SIP address, per-agent SIP accounts, prefixed m
     expect(r1.accounts).toHaveLength(1);
     expect(r1.accounts[0]).toMatchObject({ id: acct.id, sipId: '1001', password: SIP_PW });
     expect(r1.accounts[0].callServer).toMatchObject({ host: '10.0.0.5', port: 8089, transport: 'wss', realm: 'pbx.example.test', webrtcUrl: 'wss://10.0.0.5:8089/ws' });
+    expect(r1.accounts[0].callServer.connectionMode).toBe('direct'); // wss = the browser connects straight to the PBX
+    expect(r1.iceServers).toEqual([{ urls: ['stun:stun.l.google.com:19302'] }]); // STUN by default; TURN only when configured
     const r2 = (await cfg(ag2).expect(200)).body;
     expect(r2.accounts).toHaveLength(1);
     expect(JSON.stringify(r2)).not.toContain(SIP_PW);
@@ -84,7 +86,25 @@ describe('Softphone: call server SIP address, per-agent SIP accounts, prefixed m
     await t.http.put(`/api/v1/softphone-accounts/${acct2.id}`).set(bearer(ag1)).send({ status: 'disabled' }).expect(403);
   });
 
-  it('dial options expose process + prefix; the server applies the prefix and logs the call with events', async () => {
+  it('disabling the call server stops the agent softphone (no inbound calls) and enabling it brings it back', async () => {
+    const active = (tok: string) => t.http.get('/api/v1/softphone/active').set(bearer(tok)).expect(200);
+    expect((await active(ag1)).body.accountIds).toEqual([acct.id]);
+    expect((await t.http.post('/api/v1/softphone/registration').set(bearer(ag1)).send({ accountId: acct.id, state: 'registered' }).expect(200)).status).toBe(200);
+
+    await t.http.put(`/api/v1/call-servers/${server.id}`).set(bearer(a)).send({ status: 'disabled' }).expect(200);
+    expect((await active(ag1)).body.accountIds).toEqual([]);           // the softphone sees this within seconds and unregisters
+    expect((await cfg(ag1).expect(200)).body.accounts).toHaveLength(0); // no usable account, no credentials handed out
+    await t.http.post('/api/v1/softphone/calls').set(bearer(ag1)).send({ accountId: acct.id, destination: '2000' }).expect(404); // and no outbound calls either
+    const listed = (await t.http.get('/api/v1/softphone-accounts').set(bearer(a)).expect(200)).body.items.find((x: { id: string }) => x.id === acct.id);
+    expect(listed.registrationStatus).toBe('unregistered');
+
+    await t.http.put(`/api/v1/call-servers/${server.id}`).set(bearer(a)).send({ status: 'active' }).expect(200);
+    expect((await active(ag1)).body.accountIds).toEqual([acct.id]);
+    expect((await cfg(ag1).expect(200)).body.accounts).toHaveLength(1);
+    await t.http.get('/api/v1/softphone/active').expect(401);
+  });
+
+    it('dial options expose process + prefix; the server applies the prefix and logs the call with events', async () => {
     const cfgBody = (await cfg(ag1).expect(200)).body;
     expect(cfgBody.dialOptions).toHaveLength(1);
     const opt = cfgBody.dialOptions[0];
@@ -111,9 +131,15 @@ describe('Softphone: call server SIP address, per-agent SIP accounts, prefixed m
     await t.http.patch(`/api/v1/softphone/calls/${id}`).set(bearer(ag1)).send({ status: 'bogus' }).expect(400);
     await t.http.patch(`/api/v1/softphone/calls/${raw.callId}`).set(bearer(ag1)).send({ status: 'failed', sipCode: 486, cause: 'busy' }).expect(200);
 
+    await t.http.patch(`/api/v1/softphone/calls/${intl.callId}`).set(bearer(ag1)).send({ status: 'failed', sipCode: 403, cause: 'Rejected - Forbidden' }).expect(200);
+
     const mine = (await t.http.get('/api/v1/softphone/calls').set(bearer(ag1)).expect(200)).body.items;
     expect(mine).toHaveLength(3);
     expect(mine.find((c: { id: string }) => c.id === id)).toMatchObject({ status: 'completed', dialed: '919876543210', prefix: '91', from: '1001' });
+    // the Recent calls list carries the same Success / Not success result as the call lists: answered and busy are Success, a refused account is Not success
+    expect(mine.find((c: { id: string }) => c.id === id).outcome).toMatchObject({ status: 'success', note: expect.stringMatching(/answered/) });
+    expect(mine.find((c: { id: string }) => c.id === raw.callId).outcome).toMatchObject({ status: 'success', note: expect.stringMatching(/busy/) });
+    expect(mine.find((c: { id: string }) => c.id === intl.callId).outcome).toMatchObject({ status: 'not_success', note: expect.stringMatching(/refused this SIP account/) });
     expect((await t.http.get('/api/v1/softphone/calls').set(bearer(ag2)).expect(200)).body.items).toHaveLength(0);
 
     const c = await ownerConnection();

@@ -28,7 +28,7 @@ describe('config file (config-server style)', () => {
   });
 
   it('refuses secrets in the file, and bad structure', () => {
-    for (const key of ['DB_API_PASSWORD', 'JWT_ACCESS_SECRET', 'CREDENTIALS_ENCRYPTION_KEY']) {
+    for (const key of ['DB_API_PASSWORD', 'JWT_ACCESS_SECRET', 'CREDENTIALS_ENCRYPTION_KEY', 'WEBRTC_TURN_USERNAME', 'WEBRTC_TURN_CREDENTIAL']) {
       expect(() => mergeFileConfig({}, write({ defaults: { [key]: 'x' } }))).toThrow(/is a secret and must not be stored/);
     }
     expect(() => mergeFileConfig({}, write('{ nope'))).toThrow(/not valid JSON/);
@@ -46,8 +46,14 @@ describe('config file (config-server style)', () => {
     expect(cfg.db.host).toBeTruthy();
     expect(cfg.db.name).toBe('dev_dialer');
     expect(cfg.db.tls).toBe(true);
+    expect(cfg.webrtc).toEqual({ stunUrls: ['stun:stun.l.google.com:19302'], turnUrls: [], turnUsername: undefined, turnCredential: undefined });
     const raw = readFileSync(join(__dirname, '..', '..', '..', '..', 'config', 'app.config.json'), 'utf8');
     for (const key of SECRET_KEYS) expect(raw).not.toContain(`"${key}"`);
+  });
+
+  it('WebRTC ICE servers come from the environment; only stun:/stuns: and turn:/turns: urls are accepted', () => {
+    const cfg = loadConfig(mergeFileConfig({ APP_ENV: 'development', ...secrets, WEBRTC_STUN_URLS: 'stun:a.example:3478, http://evil.example, stuns:b.example:5349', WEBRTC_TURN_URLS: 'turn:t.example:3478?transport=udp,javascript:x', WEBRTC_TURN_USERNAME: 'u', WEBRTC_TURN_CREDENTIAL: 'c' }));
+    expect(cfg.webrtc).toEqual({ stunUrls: ['stun:a.example:3478', 'stuns:b.example:5349'], turnUrls: ['turn:t.example:3478?transport=udp'], turnUsername: 'u', turnCredential: 'c' });
   });
 
   it('the production section is blank on purpose, so a forgotten value fails loudly instead of using the dev database', () => {

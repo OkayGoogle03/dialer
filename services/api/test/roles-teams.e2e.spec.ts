@@ -1,4 +1,4 @@
-import { bearer, provision, RUN, startApp, TestApp, token } from './support/harness';
+import { bearer, ownerConnection, provision, RUN, startApp, TestApp, token } from './support/harness';
 
 const A = `rt-a-${RUN}`;
 const B = `rt-b-${RUN}`;
@@ -42,6 +42,15 @@ describe('Roles & Teams APIs (TiDB)', () => {
     await t.http.delete(`/api/v1/roles/${sys.id}`).set(bearer(admin)).expect(400);
 
     await t.http.delete(`/api/v1/roles/${created.body.id}`).set(bearer(admin)).expect(204);
+    // soft delete: hidden from the API, still in the table with record_status 0, and its key can be used again
+    expect((await t.http.get('/api/v1/roles').set(bearer(admin))).body.map((r: { id: string }) => r.id)).not.toContain(created.body.id);
+    const oc = await ownerConnection();
+    const [rows] = await oc.query('SELECT record_status, deleted_at FROM roles WHERE id = ?', [created.body.id]);
+    await oc.end();
+    const row = (rows as { record_status: number; deleted_at: Date | null }[])[0];
+    expect(row.record_status).toBe(0);
+    expect(row.deleted_at).not.toBeNull();
+    await t.http.post('/api/v1/roles').set(bearer(admin)).send({ key: 'qa_analyst', name: 'QA Analyst again', permissions: [] }).expect(201);
   });
 
   it('roles are tenant-isolated', async () => {

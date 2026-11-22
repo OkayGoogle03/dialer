@@ -1,12 +1,13 @@
 import { DynamicModule, Global, Inject, MiddlewareConsumer, Module, NestModule, OnApplicationShutdown, Optional } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import type { Logger } from 'pino';
 import { AuditService } from './audit/audit.service';
 import { AuthController } from './auth/auth.controller';
 import { AuthService } from './auth/auth.service';
 import { AuthGuard } from './common/auth/auth.guard';
+import { UserAwareThrottlerGuard } from './common/auth/throttler.guard';
 import { TenantStatusService } from './common/auth/tenant-status.service';
 import { ErrorFilter, LOGGER } from './common/http/error.filter';
 import { requestLoggingMiddleware } from './common/logging/logger';
@@ -106,7 +107,7 @@ export function createAppModule(d: AppDeps): DynamicModule {
       SecretsService, ConnectivityService,
       ProvidersService, TrunksService, DidsService, ProcessesService, CallServersService, AssignmentsService, CallerImportService, DialerService, SoftphoneService, CallListsService,
       { provide: TelephonyAdapter, useFactory: (c: ConnectivityService) => d.telephony ?? new AriTelephonyAdapter(c), inject: [ConnectivityService] },
-      { provide: APP_GUARD, useClass: ThrottlerGuard },
+      { provide: APP_GUARD, useClass: UserAwareThrottlerGuard },
       { provide: APP_GUARD, useClass: AuthGuard },
       { provide: APP_FILTER, useClass: ErrorFilter },
     ],

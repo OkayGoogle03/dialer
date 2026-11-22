@@ -10,6 +10,11 @@ export interface DbConfig {
   platformPassword: string;
 }
 
+/** Comma separated STUN/TURN urls; entries with another scheme are ignored. */
+function iceList(value: string, scheme: RegExp): string[] {
+  return value.split(',').map((s) => s.trim()).filter((s) => scheme.test(s) && s.length <= 200).slice(0, 6);
+}
+
 export interface AppConfig {
   nodeEnv: string;
   port: number;
@@ -28,6 +33,8 @@ export interface AppConfig {
   defaultSipTransport: 'wss' | 'ws' | 'udp' | 'tcp';
   /** Maximum time an outbound call may ring at the called party before the softphone cancels it. */
   ringTimeoutSeconds: number;
+  /** ICE servers handed to browser softphones (Direct browser-to-PBX mode). TURN credentials are secrets and come from the environment only. */
+  webrtc: { stunUrls: string[]; turnUrls: string[]; turnUsername?: string; turnCredential?: string };
   natsUrl?: string;
   outboxRelayEnabled: boolean;
   /** Seconds a tenant status is cached by the auth guard (suspension propagation delay). */
@@ -80,6 +87,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     desktopVersion: (env.DESKTOP_VERSION ?? '').slice(0, 20),
     defaultSipTransport: (['wss', 'ws', 'udp', 'tcp'] as const).find((t) => t === env.DEFAULT_SIP_TRANSPORT) ?? 'wss',
     ringTimeoutSeconds: int('RING_TIMEOUT_SECONDS', env.RING_TIMEOUT_SECONDS, 5, 1, 120),
+    webrtc: {
+      stunUrls: iceList(env.WEBRTC_STUN_URLS ?? 'stun:stun.l.google.com:19302', /^stuns?:/i),
+      turnUrls: iceList(env.WEBRTC_TURN_URLS ?? '', /^turns?:/i),
+      turnUsername: env.WEBRTC_TURN_USERNAME || undefined,
+      turnCredential: env.WEBRTC_TURN_CREDENTIAL || undefined,
+    },
     natsUrl: env.NATS_URL || undefined,
     outboxRelayEnabled: env.OUTBOX_RELAY_ENABLED === 'true',
     tenantStatusCacheSeconds: int('TENANT_STATUS_CACHE_SECONDS', env.TENANT_STATUS_CACHE_SECONDS, 15, 0, 300),

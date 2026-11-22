@@ -106,13 +106,13 @@ export class AssignmentsService {
   }
 
   private async view(tx: SqlRunner, processId: string) {
-    const [proc] = await tx.query<{ default_service_provider_id: string | null }>(`SELECT default_service_provider_id FROM outbound_processes WHERE tenant_id = :tenantId AND id = :id`, { id: processId });
+    const [proc] = await tx.query<{ default_service_provider_id: string | null }>(`SELECT default_service_provider_id FROM outbound_processes WHERE tenant_id = :tenantId AND record_status = 1 AND id = :id`, { id: processId });
     const callerAssignments = await tx.query(
       `SELECT ca.id, sp.name AS provider, d.did, ca.prefix, s.name AS call_server, ca.status, ca.import_batch_id, ca.created_at
          FROM caller_assignments ca
-         JOIN service_providers sp ON sp.id = ca.service_provider_id AND sp.tenant_id = :tenantId
-         JOIN provider_dids d ON d.id = ca.did_id AND d.tenant_id = :tenantId
-         JOIN call_servers s ON s.id = ca.call_server_id AND s.tenant_id = :tenantId
+         JOIN service_providers sp ON sp.id = ca.service_provider_id AND sp.tenant_id = :tenantId AND sp.record_status = 1
+         JOIN provider_dids d ON d.id = ca.did_id AND d.tenant_id = :tenantId AND d.record_status = 1
+         JOIN call_servers s ON s.id = ca.call_server_id AND s.tenant_id = :tenantId AND s.record_status = 1
         WHERE ca.tenant_id = :tenantId AND ca.process_id = :pid ORDER BY sp.name, d.did LIMIT 500`, { pid: processId });
     return {
       processId, ...(await this.sets(tx, processId)), defaultProviderId: proc?.default_service_provider_id ?? null,

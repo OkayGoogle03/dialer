@@ -1,0 +1,35 @@
+-- 0012: removes tables no code ever read or wrote (contact-centre / AI / campaign / queue / billing-detail ideas that were never built).
+-- call_sessions (still used: softphone calls) first loses its links to them. Children are dropped before parents (foreign keys decide the order).
+ALTER TABLE call_sessions DROP FOREIGN KEY fk_cs_queue;
+ALTER TABLE call_sessions DROP FOREIGN KEY fk_cs_disposition;
+ALTER TABLE call_sessions DROP INDEX ix_call_sessions_campaign;
+ALTER TABLE call_sessions DROP INDEX fk_cs_queue;
+ALTER TABLE call_sessions DROP INDEX fk_cs_disposition;
+ALTER TABLE call_sessions DROP COLUMN queue_id;
+ALTER TABLE call_sessions DROP COLUMN campaign_id;
+ALTER TABLE call_sessions DROP COLUMN contact_id;
+ALTER TABLE call_sessions DROP COLUMN disposition_id;
+DROP TABLE IF EXISTS ai_transcripts;
+DROP TABLE IF EXISTS ai_sessions;
+DROP TABLE IF EXISTS ai_agent_tools;
+DROP TABLE IF EXISTS campaign_contacts;
+DROP TABLE IF EXISTS consent_records;
+DROP TABLE IF EXISTS campaigns;
+DROP TABLE IF EXISTS ai_agents;
+DROP TABLE IF EXISTS ai_tools;
+DROP TABLE IF EXISTS knowledge_documents;
+DROP TABLE IF EXISTS knowledge_bases;
+DROP TABLE IF EXISTS contacts;
+DROP TABLE IF EXISTS contact_lists;
+DROP TABLE IF EXISTS caller_ids;
+DROP TABLE IF EXISTS queue_agents;
+DROP TABLE IF EXISTS queues;
+DROP TABLE IF EXISTS call_dispositions;
+DROP TABLE IF EXISTS call_legs;
+DROP TABLE IF EXISTS call_events;
+DROP TABLE IF EXISTS recordings;
+DROP TABLE IF EXISTS dnc_entries;
+DROP TABLE IF EXISTS extensions;
+DROP TABLE IF EXISTS idempotency_keys;
+DROP TABLE IF EXISTS invoices;
+DROP TABLE IF EXISTS usage_records;

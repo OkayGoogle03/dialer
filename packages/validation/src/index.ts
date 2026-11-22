@@ -20,13 +20,7 @@ export const passwordSchema = z
   .max(PASSWORD_MAX)
   .regex(/[a-zA-Z]/, 'Must contain a letter')
   .regex(/[0-9]/, 'Must contain a digit');
-export const hexColorSchema = z.string().regex(HEX_COLOR_RE, 'Use #RRGGBB');
-export const httpsUrlSchema = z.string().regex(HTTPS_URL_RE, 'Must be an https:// URL').max(1000);
-export const e164Schema = z.string().regex(E164_RE, 'Use E.164 format, e.g. +919876543210');
 export const roleKeySchema = z.string().regex(ROLE_KEY_RE, 'Lowercase letters and underscores');
-export const domainSchema = z.string().toLowerCase().regex(DOMAIN_RE, 'Invalid domain');
-
-export const loginSchema = z.object({ tenant: slugSchema, email: emailSchema, password: z.string().min(1).max(PASSWORD_MAX) });
 
 export const createTenantSchema = z.object({
   slug: slugSchema,

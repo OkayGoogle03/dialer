@@ -77,13 +77,13 @@ export class RolesService {
       const role = await this.mustGetCustom(tx, id);
       const [{ n }] = await tx.query<{ n: number }>(`SELECT COUNT(*) AS n FROM user_roles WHERE tenant_id = :tenantId AND role_id = :id`, { id });
       if (Number(n) > 0) throw new BadRequestException('Role is assigned to users; unassign it first');
-      await tx.execute(`DELETE FROM roles WHERE tenant_id = :tenantId AND id = :id`, { id });
+      await tx.execute(`UPDATE roles SET record_status = 0, deleted_at = UTC_TIMESTAMP(3) WHERE tenant_id = :tenantId AND id = :id`, { id });
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'role.deleted', entityType: 'role', entityId: id, metadata: { key: role.key } }, ctx);
     });
   }
 
   private async mustGetCustom(tx: SqlRunner, id: string) {
-    const [role] = await tx.query<{ key: string; is_system: boolean }>(`SELECT \`key\`, is_system FROM roles WHERE tenant_id = :tenantId AND id = :id FOR UPDATE`, { id });
+    const [role] = await tx.query<{ key: string; is_system: boolean }>(`SELECT \`key\`, is_system FROM roles WHERE tenant_id = :tenantId AND record_status = 1 AND id = :id FOR UPDATE`, { id });
     if (!role) throw new NotFoundException('Role not found');
     if (role.is_system) throw new BadRequestException('System roles cannot be modified');
     return role;
@@ -105,7 +105,7 @@ export class RolesService {
     const roles = await tx.query<{ id: string; key: string; name: string; description: string | null; is_system: boolean; user_count: number }>(
       `SELECT r.id, r.\`key\`, r.name, r.description, r.is_system,
               (SELECT COUNT(*) FROM user_roles ur WHERE ur.tenant_id = :tenantId AND ur.role_id = r.id) AS user_count
-         FROM roles r WHERE r.tenant_id = :tenantId ${id ? 'AND r.id = :id' : ''} ORDER BY r.is_system DESC, r.name`,
+         FROM roles r WHERE r.tenant_id = :tenantId AND r.record_status = 1 ${id ? 'AND r.id = :id' : ''} ORDER BY r.is_system DESC, r.name`,
       id ? { id } : {},
     );
     if (id && !roles.length) throw new NotFoundException('Role not found');

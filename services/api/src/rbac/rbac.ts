@@ -6,7 +6,7 @@ import type { SqlRunner } from '../database/database';
 export async function resolveRoles(tx: SqlRunner, keys: string[]): Promise<{ ids: string[]; permissions: Set<string> }> {
   const unique = [...new Set(keys)];
   if (!unique.length) return { ids: [], permissions: new Set() };
-  const roles = await tx.query<{ id: string; key: string }>(`SELECT id, \`key\` FROM roles WHERE tenant_id = :tenantId AND \`key\` IN (:keys)`, { keys: unique });
+  const roles = await tx.query<{ id: string; key: string }>(`SELECT id, \`key\` FROM roles WHERE tenant_id = :tenantId AND record_status = 1 AND \`key\` IN (:keys)`, { keys: unique });
   if (roles.length !== unique.length) {
     const found = new Set(roles.map((r) => r.key));
     throw new BadRequestException(`Unknown role: ${unique.filter((k) => !found.has(k)).join(', ')}`);

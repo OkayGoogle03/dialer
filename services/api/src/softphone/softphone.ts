@@ -10,7 +10,7 @@ import { SecretsService } from '../common/crypto/secrets.service';
 import { Database, newId, Row, SqlRunner } from '../database/database';
 import { OutboxService } from '../events/outbox.service';
 import { iso, uuidSchema, z, ZodPipe } from '../master-data/common';
-import { webrtcUrl } from '../master-data/call-servers';
+import { webrtcUrl, connectionMode } from '../master-data/call-servers';
 import { DEFAULT_DIAL_PLAN } from '../master-data/processes';
 import { normalizeDestination } from '../routing/routing';
 import { classifyOutcome } from './call-outcome';
@@ -113,6 +113,19 @@ export class SoftphoneService {
     });
   }
 
+  /**
+   * Cheap check the softphone polls every few seconds: which of the caller's accounts are usable right now (account active AND its call server active).
+   * No secrets, no audit row. When a server is disabled its accounts disappear from this list and the softphone unregisters, so no inbound call reaches the agent.
+   */
+  activeAccountIds(actor: AuthUser) {
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      const rows = await tx.query<{ id: string }>(
+        `SELECT a.id FROM softphone_accounts a JOIN call_servers s ON s.id = a.call_server_id AND s.tenant_id = :tenantId AND s.record_status = 1 AND s.status = 'active'
+          WHERE a.tenant_id = :tenantId AND a.user_id = :me AND a.record_status = 1 AND a.status = 'active'`, { me: actor.userId });
+      return { accountIds: rows.map((r) => r.id) };
+    });
+  }
+
   // ---------------------------------------------------------------- agent: own config
   /**
    * The ONLY place a SIP password leaves the server, and only to the user it belongs to (the browser softphone needs it to REGISTER).
@@ -141,13 +154,24 @@ export class SoftphoneService {
           callServer: {
             id: r.server_id, name: r.server_name, host: r.host, port: r.port ?? (r.sip_transport === 'udp' || r.sip_transport === 'tcp' ? 5060 : r.sip_transport === 'tls' ? 5061 : null), transport: r.sip_transport, wsPath: r.sip_ws_path, realm: r.sip_realm || r.host,
             webrtcUrl: webrtcUrl(r.host, r.port, r.sip_transport, r.sip_ws_path), addressUpdatedAt: iso(r.address_updated_at),
+            connectionMode: connectionMode(r.sip_transport),
           },
         })),
         dialOptions,
         fetchedAt: new Date().toISOString(),
         ringTimeoutSeconds: this.appConfig.ringTimeoutSeconds,
+        iceServers: this.iceServers(),
       };
     });
+  }
+
+  /** STUN always; TURN only when configured (relay for agents behind strict NAT / firewalls). The TURN credential is only ever sent to a signed-in agent. */
+  private iceServers() {
+    const w = this.appConfig.webrtc;
+    const out: { urls: string[]; username?: string; credential?: string }[] = [];
+    if (w.stunUrls.length) out.push({ urls: w.stunUrls });
+    if (w.turnUrls.length) out.push({ urls: w.turnUrls, ...(w.turnUsername && w.turnCredential ? { username: w.turnUsername, credential: w.turnCredential } : {}) });
+    return out;
   }
 
   reportRegistration(actor: AuthUser, dto: z.infer<typeof registrationSchema>) {
@@ -233,15 +257,24 @@ export class SoftphoneService {
         await tx.execute(`UPDATE call_sessions SET status = 'failed', ended_at = UTC_TIMESTAMP(3), hangup_cause = :c WHERE tenant_id = :tenantId AND id = :id`, { id, c: dto.cause ?? (dto.sipCode ? String(dto.sipCode) : 'failed') });
         await this.outbox.enqueue(tx, actor.tenantId, 'call.failed', { call_id: id, reason: dto.cause ?? 'failed', sip_code: dto.sipCode ?? null });
       }
+      let outcome: ReturnType<typeof classifyOutcome> | null = null;
+      if (dto.status === 'completed' || dto.status === 'failed') {
+        // Same business rule as the Excel call lists: Success when the called phone was reached (answered, rang, busy, declined, hung up), Not success when it never rang.
+        const answered = !!cur.answered_at;
+        const seconds = answered ? Math.max(0, Math.round((now.getTime() - new Date(cur.answered_at).getTime()) / 1000)) : 0;
+        outcome = classifyOutcome({ final: dto.status, answered, rang: answered || cur.status === 'ringing', cause: dto.cause, sipCode: dto.sipCode, seconds });
+        await tx.execute(`UPDATE call_sessions SET metadata = JSON_SET(COALESCE(metadata, JSON_OBJECT()), '$.outcome', JSON_OBJECT('status', :os, 'note', :on)) WHERE tenant_id = :tenantId AND id = :id`,
+          { id, os: outcome.status, on: outcome.note.slice(0, 300) });
+      }
       await this.syncListItem(tx, id, dto);
-      return { id, status: dto.status };
+      return { id, status: dto.status, ...(outcome ? { outcome } : {}) };
     });
   }
 
   /** Keeps the Excel call-list row in step with the call (live status for the UI and the Excel export). */
   private async syncListItem(tx: SqlRunner, callId: string, dto: z.infer<typeof callUpdateSchema>) {
     const base = `UPDATE call_list_items SET`;
-    const where = `WHERE tenant_id = :tenantId AND call_session_id = :cid`;
+    const where = `WHERE tenant_id = :tenantId AND record_status = 1 AND call_session_id = :cid`;
     const p = { cid: callId, cause: dto.cause ? dto.cause.slice(0, 300) : null };
     if (dto.status === 'ringing') await tx.execute(`${base} status = 'ringing' ${where}`, p);
     else if (dto.status === 'answered') await tx.execute(`${base} status = 'answered', answered_at = UTC_TIMESTAMP(3), result = 'Call answered' ${where}`, p);
@@ -260,10 +293,11 @@ export class SoftphoneService {
   listCalls(actor: AuthUser, q: z.infer<typeof callListSchema>) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const rows = await tx.query(
-        `SELECT id, status, from_number, to_number, started_at, answered_at, ended_at, duration_seconds, hangup_cause, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.prefix')) AS prefix, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.process.name')) AS process_name, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.entered')) AS entered
+        `SELECT id, status, from_number, to_number, started_at, answered_at, ended_at, duration_seconds, hangup_cause, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.prefix')) AS prefix, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.process.name')) AS process_name, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.entered')) AS entered,
+                JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.outcome.status')) AS outcome_status, JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.outcome.note')) AS outcome_note
            FROM call_sessions WHERE tenant_id = :tenantId AND user_id = :me AND direction = 'outbound' AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.source')) = 'softphone'
           ORDER BY started_at DESC LIMIT ${q.limit} OFFSET ${q.offset}`, { me: actor.userId });
-      return { items: rows.map((r) => ({ id: r.id, status: r.status, from: r.from_number, dialed: r.to_number, entered: r.entered, prefix: r.prefix, processName: r.process_name, startedAt: iso(r.started_at), answeredAt: iso(r.answered_at), endedAt: iso(r.ended_at), durationSeconds: r.duration_seconds, hangupCause: r.hangup_cause })) };
+      return { items: rows.map((r) => ({ id: r.id, status: r.status, from: r.from_number, dialed: r.to_number, entered: r.entered, prefix: r.prefix, processName: r.process_name, startedAt: iso(r.started_at), answeredAt: iso(r.answered_at), endedAt: iso(r.ended_at), durationSeconds: r.duration_seconds, hangupCause: r.hangup_cause, outcome: r.outcome_status ? { status: r.outcome_status, note: r.outcome_note ?? '' } : null })) };
     });
   }
 
@@ -308,6 +342,9 @@ export class SoftphoneController {
   // agent (own account only)
   @Get('softphone/config') @Header('Cache-Control', 'no-store') @Throttle({ default: { limit: 30, ttl: 60_000 } }) @RequirePermissions('calls:make')
   config(@CurrentUser() u: AuthUser, @ReqContext() c: RequestContext) { return this.svc.config(u, c); }
+
+  @Get('softphone/active') @Header('Cache-Control', 'no-store') @Throttle({ default: { limit: 60, ttl: 60_000 } }) @RequirePermissions('calls:make')
+  active(@CurrentUser() u: AuthUser) { return this.svc.activeAccountIds(u); }
 
   @Post('softphone/registration') @HttpCode(200) @Throttle({ default: { limit: 60, ttl: 60_000 } }) @RequirePermissions('calls:make')
   registration(@CurrentUser() u: AuthUser, @Body(new ZodPipe(registrationSchema)) dto: z.infer<typeof registrationSchema>) { return this.svc.reportRegistration(u, dto); }

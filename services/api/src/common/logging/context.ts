@@ -9,10 +9,6 @@ export interface LogContext {
 /** Per-request context propagated through async calls (logs, audit rows, outbox events). */
 export const requestContext = new AsyncLocalStorage<LogContext>();
 
-export function currentContext(): LogContext | undefined {
-  return requestContext.getStore();
-}
-
 export function currentCorrelationId(): string | null {
   return requestContext.getStore()?.correlationId ?? null;
 }

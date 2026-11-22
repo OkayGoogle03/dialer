@@ -136,7 +136,7 @@ export class DidsService {
   }
 
   private async load(tx: SqlRunner, id: string, lock = false) {
-    if (lock) await tx.query(`SELECT id FROM provider_dids WHERE tenant_id = :tenantId AND id = :id FOR UPDATE`, { id });
+    if (lock) await tx.query(`SELECT id FROM provider_dids WHERE tenant_id = :tenantId AND id = :id AND record_status = 1 FOR UPDATE`, { id });
     const [row] = await tx.query(`${SELECT} AND d.id = :id`, { id });
     if (!row) throw new NotFoundException('DID not found');
     return didView(row);

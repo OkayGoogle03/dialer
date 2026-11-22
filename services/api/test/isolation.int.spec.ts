@@ -26,7 +26,7 @@ describe('tenant isolation without RLS: guard + composite FKs + DB grants (TiDB)
       `SELECT DISTINCT TABLE_NAME AS t FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'tenant_id'`);
     await c.end();
     const withTenantId = (rows as { t: string }[]).map((r) => r.t);
-    expect(withTenantId.length).toBeGreaterThan(30);
+    expect(withTenantId.length).toBeGreaterThan(20); // sanity: the query must find the tenant tables (27 after the unused ones were dropped)
     expect(withTenantId.filter((t) => !TENANT_TABLES.has(t))).toEqual([]);
   });
 

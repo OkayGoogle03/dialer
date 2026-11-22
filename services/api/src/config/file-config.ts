@@ -4,7 +4,7 @@ import { join } from 'node:path';
 /** Settings that may never be stored in the committed config file. */
 export const SECRET_KEYS = new Set([
   'DB_API_PASSWORD', 'DB_PLATFORM_PASSWORD', 'DB_OWNER_PASSWORD', 'DB_OWNER_USER', 'JWT_ACCESS_SECRET', 'CREDENTIALS_ENCRYPTION_KEY',
-  'PROVISION_ADMIN_PASSWORD', 'NATS_URL', 'REDIS_URL',
+  'PROVISION_ADMIN_PASSWORD', 'NATS_URL', 'REDIS_URL', 'WEBRTC_TURN_USERNAME', 'WEBRTC_TURN_CREDENTIAL',
 ]);
 
 type Env = Record<string, string | undefined>;

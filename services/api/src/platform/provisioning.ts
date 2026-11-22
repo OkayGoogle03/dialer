@@ -13,18 +13,8 @@ export interface ProvisionInput {
   actor?: { userId: string; tenantId: string } | null;
 }
 
-const DEFAULT_DISPOSITIONS: [string, string, boolean, boolean, number | null][] = [
-  ['SALE', 'Sale / Success', true, false, null],
-  ['CALLBACK', 'Callback requested', false, false, 1440],
-  ['NO_ANSWER', 'No answer', false, false, 120],
-  ['BUSY', 'Busy', false, false, 30],
-  ['VOICEMAIL', 'Voicemail', false, false, 240],
-  ['NOT_INTERESTED', 'Not interested', false, false, null],
-  ['DNC', 'Do not call', false, true, null],
-];
-
 /**
- * Creates a tenant with branding, system roles, subscription, dispositions and first admin.
+ * Creates a tenant with branding, system roles, subscription and first admin.
  * Must run in a PLATFORM transaction (cross-tenant writes). Used by the platform API and the CLI.
  */
 export async function provisionTenant(tx: SqlRunner, outbox: OutboxService, i: ProvisionInput): Promise<{ tenantId: string; adminUserId: string }> {
@@ -48,12 +38,6 @@ export async function provisionTenant(tx: SqlRunner, outbox: OutboxService, i: P
   }
 
   await tx.execute(`INSERT INTO subscriptions (id, tenant_id, plan_id, current_period_end) VALUES (:id, :t, :p, DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 1 MONTH))`, { id: newId(), t: tenantId, p: plan.id });
-  for (const [code, label, ok, dnc, retry] of DEFAULT_DISPOSITIONS) {
-    await tx.execute(
-      `INSERT INTO call_dispositions (id, tenant_id, code, label, is_success, is_dnc, retry_after_minutes) VALUES (:id, :t, :c, :l, :ok, :dnc, :r)`,
-      { id: newId(), t: tenantId, c: code, l: label, ok, dnc, r: retry },
-    );
-  }
   await tx.execute(
     `INSERT INTO users (id, tenant_id, email, display_name, password_hash) VALUES (:id, :t, :e, :n, :h)`,
     { id: adminUserId, t: tenantId, e: i.adminEmail.trim().toLowerCase(), n: i.adminName.trim(), h: i.adminPasswordHash },

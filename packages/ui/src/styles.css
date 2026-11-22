@@ -271,3 +271,9 @@ input[type='file']::file-selector-button { font: inherit; font-weight: 600; marg
 
 .bulk-bar { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; padding: 8px 14px; border-radius: 999px; background: color-mix(in srgb, var(--brand-primary) 12%, var(--surface)); box-shadow: var(--shadow-inset); }
 th input[type='checkbox'], td input[type='checkbox'] { vertical-align: middle; }
+
+/* ---------- softphone connection summary + audio devices */
+.conn-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px 14px; padding: 10px 12px; margin-bottom: 8px; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-inset); }
+.conn-info > div { display: flex; flex-direction: column; min-width: 0; }
+.conn-info b { font-size: 13px; overflow-wrap: anywhere; }
+.audio-dev { margin-bottom: 10px; }

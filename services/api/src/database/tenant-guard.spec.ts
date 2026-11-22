@@ -11,7 +11,7 @@ describe('tenant scope guard', () => {
 
   it('rejects unscoped or under-scoped queries', () => {
     expect(() => assertTenantScoped('SELECT * FROM users')).toThrow(TenantScopeError);
-    expect(() => assertTenantScoped('DELETE FROM contacts WHERE id = :id')).toThrow(TenantScopeError);
+    expect(() => assertTenantScoped('DELETE FROM call_lists WHERE id = :id')).toThrow(TenantScopeError);
     expect(() => assertTenantScoped('UPDATE users SET status = :s WHERE id = :id')).toThrow(TenantScopeError);
     expect(() => assertTenantScoped(
       'SELECT * FROM users u JOIN user_roles ur ON ur.user_id = u.id WHERE u.tenant_id = :tenantId')).toThrow(/only 1/);

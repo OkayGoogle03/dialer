@@ -61,6 +61,5 @@ export function buildSet(map: Record<string, string>, dto: Record<string, unknow
 export const json = (v: unknown) => (v === undefined || v === null ? null : JSON.stringify(v));
 
 export const retryPolicySchema = z.object({ maxAttempts: intRange(1, 5).default(2), backoffMs: intRange(0, 60_000).default(0) }).strict();
-export type RetryPolicy = z.infer<typeof retryPolicySchema>;
 
 export const CODECS = ['ulaw', 'alaw', 'g722', 'opus', 'g729', 'gsm'] as const;

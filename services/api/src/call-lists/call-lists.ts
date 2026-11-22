@@ -185,12 +185,12 @@ export class CallListsService {
       if (mine) { where = ' AND l.user_id = :me'; p.me = actor.userId; } else if (q.userId) { where = ' AND l.user_id = :uid'; p.uid = q.userId; }
       const lists = await tx.query(
         `SELECT l.id, l.name, l.file_name, l.user_id, l.total_rows, l.invalid_rows, l.created_at, u.display_name AS agent_name FROM call_lists l
-           JOIN users u ON u.id = l.user_id AND u.tenant_id = :tenantId WHERE l.tenant_id = :tenantId${where} ORDER BY l.created_at DESC LIMIT 100`, p);
+           JOIN users u ON u.id = l.user_id AND u.tenant_id = :tenantId WHERE l.tenant_id = :tenantId AND l.record_status = 1${where} ORDER BY l.created_at DESC LIMIT 100`, p);
       const counts = lists.length
-        ? await tx.query<{ list_id: string; status: string; n: number }>(`SELECT list_id, status, COUNT(*) AS n FROM call_list_items WHERE tenant_id = :tenantId AND list_id IN (:ids) GROUP BY list_id, status`, { ids: lists.map((l) => l.id) })
+        ? await tx.query<{ list_id: string; status: string; n: number }>(`SELECT list_id, status, COUNT(*) AS n FROM call_list_items WHERE tenant_id = :tenantId AND record_status = 1 AND list_id IN (:ids) GROUP BY list_id, status`, { ids: lists.map((l) => l.id) })
         : [];
       const procs = lists.length
-        ? await tx.query<{ list_id: string; process_name: string }>(`SELECT DISTINCT list_id, process_name FROM call_list_items WHERE tenant_id = :tenantId AND list_id IN (:ids) AND process_name IS NOT NULL`, { ids: lists.map((l) => l.id) })
+        ? await tx.query<{ list_id: string; process_name: string }>(`SELECT DISTINCT list_id, process_name FROM call_list_items WHERE tenant_id = :tenantId AND record_status = 1 AND list_id IN (:ids) AND process_name IS NOT NULL`, { ids: lists.map((l) => l.id) })
         : [];
       return { items: lists.map((l) => ({ id: l.id, processNames: procs.filter((x) => x.list_id === l.id).map((x) => x.process_name).sort(), name: l.name, fileName: l.file_name, agentId: l.user_id, agentName: l.agent_name, total: l.total_rows, invalid: l.invalid_rows, createdAt: iso(l.created_at),
         counts: Object.fromEntries(counts.filter((c) => c.list_id === l.id).map((c) => [c.status, Number(c.n)])) })) };
@@ -203,7 +203,7 @@ export class CallListsService {
       const mine = !this.isAdmin(actor);
       const sc = mine ? ' AND l.user_id = :me' : '';
       const p: Record<string, unknown> = mine ? { me: actor.userId } : {};
-      const from = `FROM call_list_items i JOIN call_lists l ON l.id = i.list_id AND l.tenant_id = :tenantId WHERE i.tenant_id = :tenantId${sc}`;
+      const from = `FROM call_list_items i JOIN call_lists l ON l.id = i.list_id AND l.tenant_id = :tenantId WHERE i.tenant_id = :tenantId AND i.record_status = 1 AND l.record_status = 1${sc}`;
       const status = await tx.query<{ status: string; n: number }>(`SELECT i.status, COUNT(*) AS n ${from} GROUP BY i.status`, p);
       const daily = await tx.query<{ d: string; status: string; n: number }>(
         `SELECT DATE_FORMAT(i.called_at, '%Y-%m-%d') AS d, i.status, COUNT(*) AS n ${from} AND i.called_at >= UTC_TIMESTAMP() - INTERVAL ${days} DAY AND i.status IN ('success', 'not_success') GROUP BY d, i.status ORDER BY d`, p);
@@ -236,8 +236,8 @@ export class CallListsService {
       const p: Record<string, unknown> = { lid: listId };
       const st = q.status ? ' AND status = :st' : '';
       if (q.status) p.st = q.status;
-      const rows = await tx.query(`SELECT * FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid${st} ORDER BY row_no LIMIT ${q.limit} OFFSET ${q.offset}`, p);
-      const counts = await tx.query<{ status: string; n: number }>(`SELECT status, COUNT(*) AS n FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid GROUP BY status`, { lid: listId });
+      const rows = await tx.query(`SELECT * FROM call_list_items WHERE tenant_id = :tenantId AND record_status = 1 AND list_id = :lid${st} ORDER BY row_no LIMIT ${q.limit} OFFSET ${q.offset}`, p);
+      const counts = await tx.query<{ status: string; n: number }>(`SELECT status, COUNT(*) AS n FROM call_list_items WHERE tenant_id = :tenantId AND record_status = 1 AND list_id = :lid GROUP BY status`, { lid: listId });
       return { list: { id: l.id, name: l.name, agentId: l.user_id, total: l.total_rows }, counts: Object.fromEntries(counts.map((c) => [c.status, Number(c.n)])), items: rows.map(itemView) };
     });
   }
@@ -247,7 +247,7 @@ export class CallListsService {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const l = await this.loadList(tx, actor, listId);
       if (l.user_id !== actor.userId) throw new ForbiddenException('Only the agent this list belongs to can place its calls');
-      const [it] = await tx.query(`SELECT * FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid AND id = :id FOR UPDATE`, { lid: listId, id: itemId });
+      const [it] = await tx.query(`SELECT * FROM call_list_items WHERE tenant_id = :tenantId AND record_status = 1 AND list_id = :lid AND id = :id FOR UPDATE`, { lid: listId, id: itemId });
       if (!it) throw new NotFoundException('Row not found');
       if (it.status === 'invalid') throw new BadRequestException(`This row is invalid: ${it.result ?? 'see the error'}`);
       if (['initiated', 'ringing', 'answered'].includes(it.status) || it.status === 'calling') throw new ConflictException('This number is already being called');
@@ -267,7 +267,7 @@ export class CallListsService {
   remove(actor: AuthUser, id: string, ctx: RequestContext) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const l = await this.loadList(tx, actor, id);
-      await tx.execute(`DELETE FROM call_lists WHERE tenant_id = :tenantId AND id = :id`, { id });
+      await this.softDeleteList(tx, id);
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_list.deleted', entityType: 'call_list', entityId: id, metadata: { name: l.name } }, ctx);
     });
   }
@@ -279,7 +279,7 @@ export class CallListsService {
       for (const id of [...new Set(ids)]) {
         let l;
         try { l = await this.loadList(tx, actor, id); } catch { continue; }
-        await tx.execute(`DELETE FROM call_lists WHERE tenant_id = :tenantId AND id = :id`, { id });
+        await this.softDeleteList(tx, id);
         await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_list.deleted', entityType: 'call_list', entityId: id, metadata: { name: l.name, bulk: true } }, ctx);
         deleted++;
       }
@@ -292,11 +292,11 @@ export class CallListsService {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       await this.loadList(tx, actor, listId);
       const unique = [...new Set(ids)];
-      const rows = await tx.query<{ id: string; status: string }>(`SELECT id, status FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid AND id IN (:ids) FOR UPDATE`, { lid: listId, ids: unique });
+      const rows = await tx.query<{ id: string; status: string }>(`SELECT id, status FROM call_list_items WHERE tenant_id = :tenantId AND record_status = 1 AND list_id = :lid AND id IN (:ids) FOR UPDATE`, { lid: listId, ids: unique });
       const deletable = rows.filter((r) => !['calling', 'ringing', 'answered'].includes(r.status)).map((r) => r.id);
       if (deletable.length) {
-        await tx.execute(`DELETE FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid AND id IN (:ids)`, { lid: listId, ids: deletable });
-        const [c] = await tx.query<{ total: number; invalid: number }>(`SELECT COUNT(*) AS total, COALESCE(SUM(status = 'invalid'), 0) AS invalid FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid`, { lid: listId });
+        await tx.execute(`UPDATE call_list_items SET record_status = 0, deleted_at = UTC_TIMESTAMP(3) WHERE tenant_id = :tenantId AND list_id = :lid AND id IN (:ids)`, { lid: listId, ids: deletable });
+        const [c] = await tx.query<{ total: number; invalid: number }>(`SELECT COUNT(*) AS total, COALESCE(SUM(status = 'invalid'), 0) AS invalid FROM call_list_items WHERE tenant_id = :tenantId AND record_status = 1 AND list_id = :lid`, { lid: listId });
         await tx.execute(`UPDATE call_lists SET total_rows = :t, invalid_rows = :i WHERE tenant_id = :tenantId AND id = :lid`, { t: Number(c?.total ?? 0), i: Number(c?.invalid ?? 0), lid: listId });
         await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_list.rows_deleted', entityType: 'call_list', entityId: listId, metadata: { rows: deletable.length } }, ctx);
       }
@@ -308,7 +308,7 @@ export class CallListsService {
   async export(actor: AuthUser, id: string) {
     const { list, rows } = await this.db.withTenant(actor.tenantId, async (tx) => ({
       list: await this.loadList(tx, actor, id),
-      rows: await tx.query(`SELECT * FROM call_list_items WHERE tenant_id = :tenantId AND list_id = :lid ORDER BY row_no`, { lid: id }),
+      rows: await tx.query(`SELECT * FROM call_list_items WHERE tenant_id = :tenantId AND record_status = 1 AND list_id = :lid ORDER BY row_no`, { lid: id }),
     }));
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Call results');
@@ -326,8 +326,14 @@ export class CallListsService {
     return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), filename: `${list.name.replace(/[^A-Za-z0-9._-]+/g, '_')}_results.xlsx` };
   }
 
+  /** Soft delete: the list and its rows stay in the tables with record_status = 0 (1 = active). */
+  private async softDeleteList(tx: SqlRunner, id: string) {
+    await tx.execute(`UPDATE call_list_items SET record_status = 0, deleted_at = UTC_TIMESTAMP(3) WHERE tenant_id = :tenantId AND list_id = :id AND record_status = 1`, { id });
+    await tx.execute(`UPDATE call_lists SET record_status = 0, deleted_at = UTC_TIMESTAMP(3) WHERE tenant_id = :tenantId AND id = :id`, { id });
+  }
+
   private async loadList(tx: SqlRunner, actor: AuthUser, id: string) {
-    const [l] = await tx.query(`SELECT * FROM call_lists WHERE tenant_id = :tenantId AND id = :id`, { id });
+    const [l] = await tx.query(`SELECT * FROM call_lists WHERE tenant_id = :tenantId AND record_status = 1 AND id = :id`, { id });
     if (!l || (!this.isAdmin(actor) && l.user_id !== actor.userId)) throw new NotFoundException('Call list not found');
     return l;
   }

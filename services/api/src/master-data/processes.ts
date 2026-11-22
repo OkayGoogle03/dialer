@@ -143,7 +143,7 @@ export class ProcessesService {
   }
 
   private async load(tx: SqlRunner, id: string, lock = false) {
-    if (lock) await tx.query(`SELECT id FROM outbound_processes WHERE tenant_id = :tenantId AND id = :id FOR UPDATE`, { id });
+    if (lock) await tx.query(`SELECT id FROM outbound_processes WHERE tenant_id = :tenantId AND id = :id AND record_status = 1 FOR UPDATE`, { id });
     const [row] = await tx.query(`${SELECT} AND p.id = :id`, { id });
     if (!row) throw new NotFoundException('Process not found');
     return processView(row);

@@ -224,7 +224,7 @@ export class TrunksService {
   }
 
   private async load(tx: SqlRunner, id: string, lock = false) {
-    if (lock) await tx.query(`SELECT id FROM tenant_sip_providers WHERE tenant_id = :tenantId AND id = :id FOR UPDATE`, { id });
+    if (lock) await tx.query(`SELECT id FROM tenant_sip_providers WHERE tenant_id = :tenantId AND id = :id AND record_status = 1 FOR UPDATE`, { id });
     const [row] = await tx.query(`SELECT ${COLS} FROM tenant_sip_providers t WHERE t.tenant_id = :tenantId AND t.id = :id AND t.deleted_at IS NULL`, { id });
     if (!row) throw new NotFoundException('Trunk not found');
     return trunkView(row);

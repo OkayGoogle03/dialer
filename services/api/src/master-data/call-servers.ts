@@ -63,8 +63,11 @@ export function webrtcUrl(host: string | null, port: number | null, transport: s
   return `${transport}://${h}:${port ?? defaultPort(transport)}${path}`;
 }
 
+/** Which way agents reach this PBX: 'direct' = their browser connects straight to the PBX (SIP over WSS/WS + WebRTC); 'bridge' = the native SIP engine on their computer (Dialer Bridge or the Windows app) over UDP/TCP/TLS. */
+export const connectionMode = (transport: string): 'direct' | 'bridge' => (transport === 'wss' || transport === 'ws' ? 'direct' : 'bridge');
+
 export const callServerView = (r: Row) => ({
-  id: r.id, name: r.name, host: r.host, port: r.port, sipTransport: r.sip_transport, sipWsPath: r.sip_ws_path, sipRealm: r.sip_realm,
+  id: r.id, name: r.name, host: r.host, port: r.port, sipTransport: r.sip_transport, connectionMode: connectionMode(r.sip_transport), sipWsPath: r.sip_ws_path, sipRealm: r.sip_realm,
   addressUpdatedAt: iso(r.address_updated_at), webrtcUrl: webrtcUrl(r.host, r.port, r.sip_transport, r.sip_ws_path),
   instanceId: r.instance_id, ariUrl: r.ari_url, ariUsername: r.ari_username, hasPassword: !!r.has_password,
   environment: r.environment, connectionStatus: r.connection_status, connectionCheckedAt: iso(r.connection_checked_at), connectionError: r.connection_error,
@@ -129,6 +132,10 @@ export class CallServersService {
       if (addressChanged) sets.push('address_updated_at = UTC_TIMESTAMP(3)');
       if (ariChanged) sets.push(`connection_status = 'unknown'`, 'connection_checked_at = NULL', 'connection_error = NULL');
       if (sets.length) await tx.execute(`UPDATE call_servers SET ${sets.join(', ')} WHERE tenant_id = :tenantId AND id = :id`, p);
+      // A disabled server accepts no registrations from us: the agents' softphones unregister on their next check, so show them as unregistered right away.
+      if (dto.status !== undefined && dto.status !== 'active' && cur.status === 'active') {
+        await tx.execute(`UPDATE softphone_accounts SET registration_status = 'unregistered' WHERE tenant_id = :tenantId AND call_server_id = :id AND record_status = 1`, { id });
+      }
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_server.updated', entityType: 'call_server', entityId: id,
         metadata: { fields: Object.keys(dto).map((k) => (k === 'ariPassword' ? 'ariPassword(changed)' : k)), addressChanged, ariReset: ariChanged } }, ctx);
       return this.load(tx, id);
@@ -156,7 +163,7 @@ export class CallServersService {
     const secrets = await this.db.withTenant(actor.tenantId, async (tx) => {
       await this.load(tx, id);
       const [row] = await tx.query<{ ari_url: string | null; ari_username: string | null; ari_secret_encrypted: string | null }>(
-        `SELECT ari_url, ari_username, ari_secret_encrypted FROM call_servers WHERE tenant_id = :tenantId AND id = :id`, { id });
+        `SELECT ari_url, ari_username, ari_secret_encrypted FROM call_servers WHERE tenant_id = :tenantId AND record_status = 1 AND id = :id`, { id });
       return row;
     });
     if (!secrets.ari_url || !secrets.ari_username || !secrets.ari_secret_encrypted) throw new BadRequestException('ARI URL, username and password must be configured before testing');
@@ -171,7 +178,7 @@ export class CallServersService {
   }
 
   private async load(tx: SqlRunner, id: string, lock = false) {
-    if (lock) await tx.query(`SELECT id FROM call_servers WHERE tenant_id = :tenantId AND id = :id FOR UPDATE`, { id });
+    if (lock) await tx.query(`SELECT id FROM call_servers WHERE tenant_id = :tenantId AND id = :id AND record_status = 1 FOR UPDATE`, { id });
     const [row] = await tx.query(`SELECT ${COLS} FROM call_servers s WHERE s.tenant_id = :tenantId AND s.id = :id AND s.deleted_at IS NULL`, { id });
     if (!row) throw new NotFoundException('Call server not found');
     return callServerView(row);

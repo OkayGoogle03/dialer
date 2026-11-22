@@ -111,7 +111,7 @@ export class ProvidersService {
   }
 
   private async load(tx: SqlRunner, id: string, lock = false) {
-    if (lock) await tx.query(`SELECT id FROM service_providers WHERE tenant_id = :tenantId AND id = :id FOR UPDATE`, { id });
+    if (lock) await tx.query(`SELECT id FROM service_providers WHERE tenant_id = :tenantId AND id = :id AND record_status = 1 FOR UPDATE`, { id });
     const [row] = await tx.query(`${SELECT} AND sp.id = :id`, { id });
     if (!row) throw new NotFoundException('Provider not found');
     return providerView(row);
