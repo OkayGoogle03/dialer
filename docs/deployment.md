@@ -1,11 +1,11 @@
 # Deployment
 
 ## Local development
-Prerequisites: Node >= 22, pnpm, a TiDB/MySQL database, Docker Desktop for Redis/NATS.
+Prerequisites: Node >= 22, pnpm, a TiDB/MySQL database, Docker Desktop for NATS (optional).
 
 ```bash
 cp .env.example .env   # fill DB_*, JWT_ACCESS_SECRET
-docker compose up -d   # redis + nats
+docker compose up -d   # nats (optional)
 pnpm install && pnpm build:packages
 pnpm db:migrate && pnpm db:setup-roles
 PROVISION_ADMIN_PASSWORD=... pnpm --filter @dialer/api provision -- --slug platform --name Platform --email root@example.com --admin-name Root --platform --plan enterprise
@@ -55,3 +55,9 @@ Serverless limits to know about:
 - Cold starts add a second or two to the first request after idle time.
 - The Vercel Hobby (free) plan is for non-commercial use only.
 - Verified only up to the function entry (run locally with a plain Node server and only the four secrets set); it has not been deployed from Vercel yet.
+
+## Security headers, rate limiting, and the PBX
+- `vercel.json` sends security headers for the whole site and a Content-Security-Policy for the pages (scripts only from the site itself; WebSocket connections only to `wss:`). Details and what was verified: `ops/pbx-new/DEPLOY.md` section 7.
+- The API counts requests per signed-in user (verified token) and per client address otherwise (`services/api/src/common/auth/throttler.guard.ts`).
+- `RING_TIMEOUT_SECONDS` (default 5) must be raised for real calls; it is a production setting (`ops/pbx-new/DEPLOY.md` section 6).
+- The personal PBX (Asterisk on a VPS, WSS + WebRTC): `ops/pbx-new/`.
