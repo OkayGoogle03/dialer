@@ -14,6 +14,7 @@ import { webrtcUrl, connectionMode } from '../master-data/call-servers';
 import { DEFAULT_DIAL_PLAN } from '../master-data/processes';
 import { normalizeDestination } from '../routing/routing';
 import { classifyOutcome } from './call-outcome';
+import { turnRestCredential } from './turn';
 
 const sipId = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9._@+-]+$/, 'letters, digits and . _ @ + - only');
 const sipSecret = z.string().min(1).max(200).regex(/^[^\r\n\0]+$/);
@@ -160,17 +161,20 @@ export class SoftphoneService {
         dialOptions,
         fetchedAt: new Date().toISOString(),
         ringTimeoutSeconds: this.appConfig.ringTimeoutSeconds,
-        iceServers: this.iceServers(),
+        iceServers: this.iceServers(actor.userId),
       };
     });
   }
 
-  /** STUN always; TURN only when configured (relay for agents behind strict NAT / firewalls). The TURN credential is only ever sent to a signed-in agent. */
-  private iceServers() {
+  /** STUN always; TURN only when configured (relay for agents behind strict NAT / firewalls). TURN credentials are only ever sent to a signed-in agent (short-lived when WEBRTC_TURN_SECRET is set). */
+  private iceServers(userId: string) {
     const w = this.appConfig.webrtc;
     const out: { urls: string[]; username?: string; credential?: string }[] = [];
     if (w.stunUrls.length) out.push({ urls: w.stunUrls });
-    if (w.turnUrls.length) out.push({ urls: w.turnUrls, ...(w.turnUsername && w.turnCredential ? { username: w.turnUsername, credential: w.turnCredential } : {}) });
+    if (w.turnUrls.length && w.turnSecret) {
+      // only short-lived credentials derived from the shared secret (coturn use-auth-secret) ever reach a browser; loadConfig refuses TURN urls without the secret
+      out.push({ urls: w.turnUrls, ...turnRestCredential(w.turnSecret, userId, Date.now(), w.turnTtlSeconds) });
+    }
     return out;
   }
 

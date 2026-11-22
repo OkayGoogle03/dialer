@@ -40,12 +40,27 @@ export function pools(config = testConfig()) {
   };
 }
 
-/** Owner connection for assertions that must bypass the app (e.g. reading outbox rows). Never used by app code. */
+/**
+ * Owner connection for assertions that must bypass the app (e.g. reading outbox rows). Never used by app code.
+ * Opening a NEW connection to the shared remote database occasionally stalls past the 10 s connect timeout (seen as `connect ETIMEDOUT`, once or twice per
+ * complete run, and it made one test fail with five dependent ones). Only the connection attempt is retried (up to 3 times, other errors are never retried)
+ * and every retry is printed, so a flaky link stays visible; no assertion is affected.
+ */
 export async function ownerConnection(config = testConfig()) {
-  return mysql.createConnection({
-    host: config.db.host, port: config.db.port, database: config.db.name, user: process.env.DB_OWNER_USER, password: process.env.DB_OWNER_PASSWORD,
-    ssl: config.db.tls ? { minVersion: 'TLSv1.2', rejectUnauthorized: true } : undefined, timezone: 'Z', namedPlaceholders: true,
-  });
+  const transient = new Set(['ETIMEDOUT', 'ECONNRESET', 'EPIPE', 'PROTOCOL_CONNECTION_LOST']);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await mysql.createConnection({
+        host: config.db.host, port: config.db.port, database: config.db.name, user: process.env.DB_OWNER_USER, password: process.env.DB_OWNER_PASSWORD,
+        ssl: config.db.tls ? { minVersion: 'TLSv1.2', rejectUnauthorized: true } : undefined, timezone: 'Z', namedPlaceholders: true,
+      });
+    } catch (e) {
+      const code = (e as { code?: string }).code ?? '';
+      if (attempt >= 3 || !transient.has(code)) throw e;
+      console.warn(`[db] owner connection attempt ${attempt} failed (${code}); retrying`);
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
 }
 
 export class MemoryLogStream extends Writable {
@@ -70,8 +85,9 @@ export interface TestApp {
   close(): Promise<void>;
 }
 
-export async function startApp(opts: { publisher?: EventPublisher; logLevel?: string; telephony?: TelephonyAdapter } = {}): Promise<TestApp> {
+export async function startApp(opts: { publisher?: EventPublisher; logLevel?: string; telephony?: TelephonyAdapter; webrtc?: Partial<AppConfig['webrtc']> } = {}): Promise<TestApp> {
   const config = testConfig();
+  if (opts.webrtc) config.webrtc = { ...config.webrtc, ...opts.webrtc };
   const { db, platformDb } = pools(config);
   const logs = new MemoryLogStream();
   const logger = createLogger(opts.logLevel ?? 'info', logs);

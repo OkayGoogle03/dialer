@@ -33,8 +33,8 @@ export interface AppConfig {
   defaultSipTransport: 'wss' | 'ws' | 'udp' | 'tcp';
   /** Maximum time an outbound call may ring at the called party before the softphone cancels it. */
   ringTimeoutSeconds: number;
-  /** ICE servers handed to browser softphones (Direct browser-to-PBX mode). TURN credentials are secrets and come from the environment only. */
-  webrtc: { stunUrls: string[]; turnUrls: string[]; turnUsername?: string; turnCredential?: string };
+  /** ICE servers handed to browser softphones (Direct browser-to-PBX mode). Browsers only ever receive SHORT-LIVED TURN credentials derived from turnSecret (coturn use-auth-secret); the secret itself and any fixed TURN password never leave the server. */
+  webrtc: { stunUrls: string[]; turnUrls: string[]; turnSecret?: string; turnTtlSeconds: number };
   natsUrl?: string;
   outboxRelayEnabled: boolean;
   /** Seconds a tenant status is cached by the auth guard (suspension propagation delay). */
@@ -72,6 +72,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     platformUser: env.DB_PLATFORM_USER || `${prefix}dialer_platform`,
     platformPassword: req('DB_PLATFORM_PASSWORD'),
   };
+  const turnUrls = iceList(env.WEBRTC_TURN_URLS ?? '', /^turns?:/i);
+  if (turnUrls.length && !env.WEBRTC_TURN_SECRET) errors.push('WEBRTC_TURN_URLS needs WEBRTC_TURN_SECRET: browsers only get short-lived TURN credentials derived from it (a fixed TURN username/password is not supported)');
   if (errors.length) throw new Error(`Invalid configuration:\n - ${errors.join('\n - ')}`);
   return {
     nodeEnv: env.NODE_ENV ?? 'development',
@@ -89,9 +91,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ringTimeoutSeconds: int('RING_TIMEOUT_SECONDS', env.RING_TIMEOUT_SECONDS, 5, 1, 120),
     webrtc: {
       stunUrls: iceList(env.WEBRTC_STUN_URLS ?? 'stun:stun.l.google.com:19302', /^stuns?:/i),
-      turnUrls: iceList(env.WEBRTC_TURN_URLS ?? '', /^turns?:/i),
-      turnUsername: env.WEBRTC_TURN_USERNAME || undefined,
-      turnCredential: env.WEBRTC_TURN_CREDENTIAL || undefined,
+      turnUrls,
+      turnSecret: env.WEBRTC_TURN_SECRET || undefined,
+      turnTtlSeconds: int('WEBRTC_TURN_TTL_SECONDS', env.WEBRTC_TURN_TTL_SECONDS, 86400, 300, 604800),
     },
     natsUrl: env.NATS_URL || undefined,
     outboxRelayEnabled: env.OUTBOX_RELAY_ENABLED === 'true',

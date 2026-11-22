@@ -101,6 +101,14 @@ export function useSoftphone() {
     if (id) api.patch(`/softphone/calls/${id}`, { status, ...extra }).catch(() => undefined);
   }, []);
 
+  /** Plays the other party's audio. For an OUTGOING call JsSIP creates the peer connection inside ua.call() (before it returns), so this must be
+   *  registered through the call's eventHandlers, not with session.on() afterwards: a late listener never fires and the caller hears nothing. */
+  const attachRemoteAudio = useCallback((pc: RTCPeerConnection) => {
+    pc.ontrack = (ev: RTCTrackEvent) => {
+      if (audio.current && ev.streams[0]) { audio.current.srcObject = ev.streams[0]; void audio.current.play().catch(() => undefined); }
+    };
+  }, []);
+
   const wireSession = useCallback((s: any, base: ActiveCall) => {
     session.current = s;
     setCall(base);
@@ -124,11 +132,7 @@ export function useSoftphone() {
       setCall((c) => ({ ...c, state: 'in_call', startedAt: Date.now() }));
       track(base.callId, 'answered');
     });
-    s.on('peerconnection', (e: any) => {
-      e.peerconnection.ontrack = (ev: RTCTrackEvent) => {
-        if (audio.current && ev.streams[0]) { audio.current.srcObject = ev.streams[0]; void audio.current.play().catch(() => undefined); }
-      };
-    });
+    s.on('peerconnection', (e: any) => attachRemoteAudio(e.peerconnection)); // incoming calls: the connection is created at answer(), after this runs
     s.on('failed', (e: any) => {
       clearRing();
       if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause() }); setCall({ ...IDLE_CALL, note: timeoutCause() + ' - call disconnected' }); session.current = null; return; }
@@ -150,7 +154,7 @@ export function useSoftphone() {
       const remote = e?.originator === 'remote' || /remote/i.test(String(e?.cause ?? ''));
       track(base.callId, 'completed', { cause: remote ? 'Called party disconnected' : 'Agent ended the call' }); finishCall();
     });
-  }, [finishCall, track]);
+  }, [finishCall, track, attachRemoteAudio]);
 
   const startUa = useCallback(async (acct: SoftphoneAccount) => {
     stopUa();
@@ -262,9 +266,12 @@ export function useSoftphone() {
 
   /** Dials what the server returned (prefix already applied) and wires the call events. */
   const startCall = useCallback(async (placed: { callId: string; dialed: string; prefix: string; target: string }) => {
-    const s = await ua.current.call(placed.target, { mediaConstraints: mediaConstraints(), rtcOfferConstraints: { offerToReceiveAudio: true }, pcConfig: rtcConfig() });
+    const s = await ua.current.call(placed.target, {
+      mediaConstraints: mediaConstraints(), rtcOfferConstraints: { offerToReceiveAudio: true }, pcConfig: rtcConfig(),
+      eventHandlers: { peerconnection: (e: { peerconnection: RTCPeerConnection }) => attachRemoteAudio(e.peerconnection) },
+    });
     wireSession(s, { ...IDLE_CALL, state: 'dialing', number: placed.dialed, callId: placed.callId, note: placed.prefix ? `Prefix ${placed.prefix} applied` : null });
-  }, [wireSession]);
+  }, [wireSession, attachRemoteAudio]);
 
   const dial = useCallback(async (destination: string, assignmentId?: string) => {
     const acct = accountRef.current;
@@ -309,7 +316,7 @@ export function useSoftphone() {
   const hangup = useCallback(() => { try { session.current?.terminate(); } catch { /* already ended */ } }, []);
   const answer = useCallback(() => {
     try { session.current?.answer({ mediaConstraints: mediaConstraints(), pcConfig: rtcConfig() }); } catch (e) { setError(errText(e, 'Could not answer')); }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
   const mute = useCallback(() => {
     const s = session.current; if (!s) return;
     const m = !callRef.current.muted;
