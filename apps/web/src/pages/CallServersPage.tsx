@@ -7,13 +7,15 @@ import type { UserView } from '../api/client';
 import { ConfigForm, errText, Notice, statusTone, useList } from '../components/kit';
 import { BulkBar, selectColumn, useSelection } from '../components/selection';
 
+// The transport decides how agents reach this PBX: browsers connect straight to it (SIP over WSS + WebRTC), or the Windows desktop app's SIP engine does it over UDP/TCP/TLS.
 const TRANSPORTS = [
-  { value: 'wss', label: 'WSS - secure WebSocket (browser softphone)' },
-  { value: 'ws', label: 'WS - WebSocket (browser, testing only)' },
-  { value: 'udp', label: 'UDP (desktop app only)' },
-  { value: 'tcp', label: 'TCP (desktop app only)' },
-  { value: 'tls', label: 'TLS (desktop app only)' },
+  { value: 'wss', label: 'Direct browser-to-PBX: WSS (secure WebSocket + WebRTC, recommended)' },
+  { value: 'ws', label: 'Direct browser-to-PBX: WS (testing only, not encrypted)' },
+  { value: 'udp', label: 'Windows desktop app: UDP' },
+  { value: 'tcp', label: 'Windows desktop app: TCP' },
+  { value: 'tls', label: 'Windows desktop app: TLS' },
 ];
+const MODE_LABEL = { direct: 'Direct browser-to-PBX', bridge: 'Windows desktop app' } as const;
 
 const fields = [
   { name: 'name', label: 'Server name', required: true },
@@ -66,6 +68,7 @@ export function CallServersPage() {
         columns={[
           ...(manage ? [selectColumn(items, (s: CallServerView) => s.id, sel)] : []),
           { key: 'n', header: 'Server', render: (s) => <><strong>{s.name}</strong><div className="hint">{s.webrtcUrl ?? (s.host ? `${s.sipTransport}://${s.host}${s.port ? `:${s.port}` : ''}` : 'SIP address not set')}</div></> },
+          { key: 'm', header: 'Connection mode', render: (s) => <Badge tone={s.connectionMode === 'direct' ? 'ok' : undefined}>{MODE_LABEL[s.connectionMode ?? 'bridge']}</Badge> },
           { key: 'u', header: 'Address updated', render: (s) => (s.addressUpdatedAt ? new Date(s.addressUpdatedAt).toLocaleString() : '—') },
           { key: 's', header: 'Status', render: (s) => <Badge tone={statusTone(s.status)}>{s.status.replace('_', ' ')}</Badge> },
           { key: 'a', header: '', render: (s) => manage && (

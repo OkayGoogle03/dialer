@@ -8,9 +8,10 @@ import { CallListRows, ResultDonut, exportList, useListItems } from '../componen
 import { useSoftphone } from '../softphone/useSoftphone';
 import { BulkBar, useSelection } from '../components/selection';
 
-interface LogCall { processName?: string | null; id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null }
+interface LogCall { processName?: string | null; id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null; outcome?: { status: 'success' | 'not_success'; note: string } | null }
 
 const PAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
+const CALL_LABEL: Record<string, string> = { idle: 'Idle', dialing: 'Dialling…', ringing: 'Ringing…', in_call: 'In call', incoming: 'Incoming call' };
 const REG_LABEL: Record<string, string> = { idle: 'Not registered', connecting: 'Registering…', registered: 'Registered', failed: 'Registration failed', unavailable: 'Unavailable' };
 
 function Timer({ since }: { since: number | null }) {
@@ -60,6 +61,7 @@ export function SoftphonePage() {
     );
   }
 
+  const direct = (sp.account?.callServer.connectionMode ?? (sp.account && /^wss?$/.test(sp.account.callServer.transport) ? 'direct' : 'bridge')) === 'direct';
   return (
     <>
       <PageHeader title="Softphone" actions={<Badge tone={sp.reg === 'registered' ? 'ok' : sp.reg === 'failed' || sp.reg === 'unavailable' ? 'off' : undefined}>{REG_LABEL[sp.reg]}</Badge>} />
@@ -68,13 +70,33 @@ export function SoftphonePage() {
       </Notice>
       {sp.regError && <Alert>{sp.regError}</Alert>}
       {sp.error && <Alert>{sp.error}</Alert>}
-      {sp.call.note && sp.call.state === 'idle' && <Alert>{sp.call.note}</Alert>}
+      {sp.call.note && sp.call.state === 'idle' && <Alert tone={sp.call.noteOk ? 'success' : 'error'}>{sp.call.note}</Alert>}
       <audio ref={sp.audio} autoPlay />
       <div className="sp-grid">
         <Card title="Phone">
-          <p className="hint" style={{ marginTop: 0 }}>
-            {sp.account?.sipId} @ {sp.account?.callServer.name} <span>({sp.account?.callServer.webrtcUrl ?? 'no WebSocket address'})</span>
-          </p>
+          <div className="conn-info" aria-label="Connection">
+            <div><span className="hint">Mode</span><b>{direct ? 'Direct browser-to-PBX (WSS + WebRTC)' : 'Windows desktop app (UDP/TCP SIP)'}</b></div>
+            <div><span className="hint">Extension</span><b>{sp.account?.sipId ?? '—'}</b></div>
+            <div><span className="hint">Call server</span><b>{sp.account?.callServer.name ?? '—'}</b></div>
+            <div><span className="hint">Connection</span><b>{REG_LABEL[sp.reg]}</b></div>
+            <div><span className="hint">Call</span><b>{CALL_LABEL[sp.call.state]}</b></div>
+          </div>
+          {direct && sp.account?.callServer.webrtcUrl && <p className="hint" style={{ margin: '0 0 8px' }}>{sp.account.callServer.webrtcUrl}</p>}
+          {direct && (
+            <details className="audio-dev">
+              <summary>Microphone and speaker</summary>
+              <div className="stack" style={{ marginTop: 8 }}>
+                {!sp.devices.labelled && <div><Button size="small" variant="secondary" type="button" onClick={() => void sp.grantMic()}>Allow microphone to list devices</Button></div>}
+                <SelectField label="Microphone" value={sp.micId} onChange={(e) => sp.setMicId(e.target.value)}
+                  options={[{ value: '', label: 'System default' }, ...sp.devices.mics.filter((d) => d.deviceId && d.deviceId !== 'default').map((d, i) => ({ value: d.deviceId, label: d.label || `Microphone ${i + 1}` }))]} />
+                {sp.sinkSupported
+                  ? <SelectField label="Speaker" value={sp.speakerId} onChange={(e) => sp.setSpeakerId(e.target.value)}
+                      options={[{ value: '', label: 'System default' }, ...sp.devices.speakers.filter((d) => d.deviceId && d.deviceId !== 'default').map((d, i) => ({ value: d.deviceId, label: d.label || `Speaker ${i + 1}` }))]} />
+                  : <p className="hint" style={{ margin: 0 }}>This browser plays calls on the system default speaker (choosing a speaker needs Chrome or Edge).</p>}
+                <span className="hint">Applies to the next call. Remembered on this computer.</span>
+              </div>
+            </details>
+          )}
           {(sp.config?.accounts.length ?? 0) > 1 && (
             <SelectField label="SIP account" value={sp.accountId} onChange={(e) => sp.setAccountId(e.target.value)}
               options={(sp.config?.accounts ?? []).map((a) => ({ value: a.id, label: `${a.sipId} @ ${a.callServer.name}` }))} />
@@ -118,7 +140,9 @@ export function SoftphonePage() {
             columns={[
               { key: 't', header: 'Started', render: (c) => new Date(c.startedAt).toLocaleTimeString() },
               { key: 'd', header: 'Dialled', render: (c) => <>{c.dialed}{c.prefix && <div className="hint">typed {c.entered} + prefix {c.prefix}</div>}{c.processName && <div className="hint">Process: {c.processName}</div>}</> },
-              { key: 's', header: 'Status', render: (c) => <><Badge tone={c.status === 'completed' ? 'ok' : c.status === 'failed' ? 'off' : undefined}>{c.status}</Badge>{c.durationSeconds != null && <div className="hint">{c.durationSeconds}s</div>}</> },
+              { key: 's', header: 'Status', render: (c) => c.outcome
+                ? <><Badge tone={c.outcome.status === 'success' ? 'ok' : 'off'}>{c.outcome.status === 'success' ? 'Success' : 'Not success'}</Badge><div className="hint">{c.outcome.note}</div>{c.durationSeconds != null && c.durationSeconds > 0 && <div className="hint">{c.durationSeconds}s</div>}</>
+                : <><Badge tone={c.status === 'completed' ? 'ok' : c.status === 'failed' ? 'off' : undefined}>{c.status}</Badge>{c.durationSeconds != null && <div className="hint">{c.durationSeconds}s</div>}</> },
             ]} /></div>
           <div style={{ marginTop: 8 }}><Button size="small" variant="secondary" onClick={loadLog}>Refresh</Button></div>
         </Card>

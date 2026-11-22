@@ -2,21 +2,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { errText } from '../components/kit';
 import { isNativeTransport, nativeAvailable, startNative } from './nativeEngine';
+import { createRejectionTracker, credentialRejectedMessage, isCredentialRejection } from './registrationRetry';
 
 export interface SoftphoneAccount {
   id: string; sipId: string; displayName: string | null; password: string;
-  callServer: { id: string; name: string; host: string | null; port: number | null; transport: string; wsPath: string; realm: string | null; webrtcUrl: string | null; addressUpdatedAt: string | null };
+  callServer: { id: string; name: string; host: string | null; port: number | null; transport: string; connectionMode?: 'direct' | 'bridge'; wsPath: string; realm: string | null; webrtcUrl: string | null; addressUpdatedAt: string | null };
 }
 export interface DialOption { assignmentId: string; processId: string; processName: string; prefix: string; callServerId: string }
-export interface SoftphoneConfig { accounts: SoftphoneAccount[]; dialOptions: DialOption[]; fetchedAt: string; ringTimeoutSeconds?: number }
+export interface IceServer { urls: string | string[]; username?: string; credential?: string }
+export interface SoftphoneConfig { accounts: SoftphoneAccount[]; dialOptions: DialOption[]; fetchedAt: string; ringTimeoutSeconds?: number; iceServers?: IceServer[] }
 
 export type RegState = 'idle' | 'connecting' | 'registered' | 'failed' | 'unavailable';
 export type CallState = 'idle' | 'dialing' | 'ringing' | 'in_call' | 'incoming';
-export interface ActiveCall { state: CallState; number: string; direction: 'out' | 'in'; startedAt: number | null; muted: boolean; callId: string | null; note: string | null }
+export interface ActiveCall { state: CallState; number: string; direction: 'out' | 'in'; startedAt: number | null; muted: boolean; callId: string | null; note: string | null; /** the note reports a normal / successful end (shown as a success message, not an error) */ noteOk?: boolean }
 
 const IDLE_CALL: ActiveCall = { state: 'idle', number: '', direction: 'out', startedAt: null, muted: false, callId: null, note: null };
 /** Agents pick up an admin's IP change within this time even if the connection never drops. */
 const REFETCH_MS = 5 * 60_000;
+const ACTIVE_CHECK_MS = 10_000;
 const RETRY_MS = 30_000;
 
 /** Identity of everything that needs a new SIP UA when it changes (address, credentials). */
@@ -39,6 +42,8 @@ export function useSoftphone() {
   const ua = useRef<any>(null);
   const session = useRef<any>(null);
   const keyRef = useRef('');
+  // identities (account + password + server) the PBX rejected: never retried automatically, see registrationRetry.ts
+  const rejected = useRef(createRejectionTracker());
   const audio = useRef<HTMLAudioElement | null>(null);
   const accountRef = useRef<SoftphoneAccount | undefined>(undefined);
   const regRef = useRef<RegState>('idle');
@@ -52,6 +57,32 @@ export function useSoftphone() {
 
   const account = config?.accounts.find((a) => a.id === accountId) ?? config?.accounts[0];
   accountRef.current = account;
+
+  // ---- audio devices (browser calling): the agent's own microphone and speaker, remembered on this computer
+  const store = (k: string, v?: string) => { try { if (v === undefined) return localStorage.getItem(k) ?? ''; if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch { /* storage blocked */ } return v ?? ''; };
+  const [micId, setMicIdState] = useState(() => store('dialer.micId'));
+  const [speakerId, setSpeakerIdState] = useState(() => store('dialer.speakerId'));
+  const [devices, setDevices] = useState<{ mics: MediaDeviceInfo[]; speakers: MediaDeviceInfo[]; labelled: boolean }>({ mics: [], speakers: [], labelled: false });
+  const micRef = useRef(micId);
+  micRef.current = micId;
+  const setMicId = useCallback((id: string) => { setMicIdState(id); store('dialer.micId', id); }, []);
+  const setSpeakerId = useCallback((id: string) => { setSpeakerIdState(id); store('dialer.speakerId', id); }, []);
+  const loadDevices = useCallback(async () => {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      setDevices({ mics: all.filter((d) => d.kind === 'audioinput'), speakers: all.filter((d) => d.kind === 'audiooutput'), labelled: all.some((d) => d.label) });
+    } catch { /* no media devices API */ }
+  }, []);
+  /** Asks for microphone permission once so the browser reveals the device names. */
+  const grantMic = useCallback(async () => {
+    try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); } catch { setError('Microphone permission was not given. Allow the microphone for this site in the browser address bar.'); }
+    await loadDevices();
+  }, [loadDevices]);
+  useEffect(() => { void loadDevices(); navigator.mediaDevices?.addEventListener?.('devicechange', loadDevices); return () => navigator.mediaDevices?.removeEventListener?.('devicechange', loadDevices); }, [loadDevices]);
+  const sinkSupported = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+  useEffect(() => { const el = audio.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null; if (el?.setSinkId) void el.setSinkId(speakerId || 'default').catch(() => undefined); }, [speakerId, call.state]);
+  const mediaConstraints = () => ({ audio: micRef.current ? { deviceId: { exact: micRef.current } } : true, video: false });
+  const rtcConfig = () => ({ iceServers: configRef.current?.iceServers?.length ? configRef.current.iceServers : [{ urls: 'stun:stun.l.google.com:19302' }] });
 
   const report = useCallback((id: string, state: 'registered' | 'unregistered' | 'failed', msg?: string) => {
     api.post('/softphone/registration', { accountId: id, state, ...(msg ? { error: msg.slice(0, 300) } : {}) }).catch(() => undefined);
@@ -81,6 +112,8 @@ export function useSoftphone() {
     const timeoutCause = () => (sawRinging ? `No answer within ${ringMs / 1000} s (ring limit)` : `No ringing within ${ringMs / 1000} s (the call server only sent progress / early media)`);
     let sawRinging = false;
     s.on('progress', () => {
+      // JsSIP also emits 'progress' for an INCOMING call when it sends its own 180 Ringing; that must not replace the Answer / Reject screen.
+      if (base.direction === 'in') return;
       // 180 Ringing and 183 Session Progress (ringback / early media) both mean the call server is ringing the user's phone.
       if (!sawRinging) { sawRinging = true; track(base.callId, 'ringing'); }
       setCall((c) => ({ ...c, state: 'ringing' }));
@@ -101,9 +134,15 @@ export function useSoftphone() {
       if (timedOut) { track(base.callId, 'completed', { cause: timeoutCause() }); setCall({ ...IDLE_CALL, note: timeoutCause() + ' - call disconnected' }); session.current = null; return; }
       const code = e?.message?.status_code as number | undefined;
       const phrase = e?.message?.reason_phrase as string | undefined;
-      track(base.callId, 'failed', { cause: `${e?.cause ?? 'failed'}${phrase && !String(e?.cause ?? '').includes(phrase) ? ` - ${phrase}` : ''}`.slice(0, 100), ...(code ? { sipCode: code } : {}) });
-      setCall({ ...IDLE_CALL, note: `Call failed: ${e?.cause ?? 'unknown'}${code ? ` (${code})` : ''}` });
+      const failedNote = `Call failed: ${e?.cause ?? 'unknown'}${code ? ` (${code})` : ''}`;
+      const body = { status: 'failed', cause: `${e?.cause ?? 'failed'}${phrase && !String(e?.cause ?? '').includes(phrase) ? ` - ${phrase}` : ''}`.slice(0, 100), ...(code ? { sipCode: code } : {}) };
       session.current = null;
+      if (!base.callId) { setCall({ ...IDLE_CALL, note: failedNote }); return; }
+      // The server decides what the end of the call means (same rule as Recent calls and the call lists): declined / no answer / busy are Success ("Call ended"), the rest keep "Call failed".
+      setCall(IDLE_CALL);
+      api.patch<{ outcome?: { status: string; note: string } }>(`/softphone/calls/${base.callId}`, body)
+        .then((r) => setCall((c) => (c.state !== 'idle' || c.note ? c : { ...IDLE_CALL, note: r?.outcome?.status === 'success' ? `Call ended: ${r.outcome.note}`.slice(0, 200) : failedNote, noteOk: r?.outcome?.status === 'success' })))
+        .catch(() => setCall((c) => (c.state !== 'idle' || c.note ? c : { ...IDLE_CALL, note: failedNote })));
     });
     s.on('ended', (e: any) => {
       clearRing();
@@ -116,7 +155,7 @@ export function useSoftphone() {
   const startUa = useCallback(async (acct: SoftphoneAccount) => {
     stopUa();
     if (isNativeTransport(acct.callServer.transport)) {
-      if (!nativeAvailable()) { setReg('unavailable'); setRegError(`This call server uses ${acct.callServer.transport.toUpperCase()} SIP, which a browser cannot do. Install the Windows desktop app (sidebar: Download App) and sign in there.`); return; }
+      if (!nativeAvailable()) { setReg('unavailable'); setRegError(`This call server uses ${acct.callServer.transport.toUpperCase()} SIP, which a browser cannot do. Use the Windows desktop app (sidebar: Download App), or ask your administrator to switch this call server to Direct browser-to-PBX (WSS).`); return; }
       setReg('connecting'); setRegError(null);
       const key = uaKey(acct);
       keyRef.current = key;
@@ -132,6 +171,11 @@ export function useSoftphone() {
       return;
     }
     if (!acct.callServer.webrtcUrl) { setReg('unavailable'); setRegError('This call server is configured with a transport the browser cannot use (needs WSS/WS).'); return; }
+    const identity = uaKey(acct);
+    if (rejected.current.has(identity)) {
+      // same rejected credentials as before: no new REGISTER (the PBX would count another failed login)
+      keyRef.current = identity; setReg('failed'); setRegError(credentialRejectedMessage(401)); return;
+    }
     const { default: JsSIP } = await import('jssip');
     const realm = acct.callServer.realm || acct.callServer.host || '';
     setReg('connecting'); setRegError(null);
@@ -148,8 +192,10 @@ export function useSoftphone() {
     u.on('unregistered', () => { if (!cur()) return; setReg('idle'); report(acct.id, 'unregistered'); });
     u.on('registrationFailed', (e: any) => {
       if (!cur()) return;
-      const msg = `Registration rejected${e?.response?.status_code ? ` (${e.response.status_code} ${e.response.reason_phrase ?? ''})` : ''}`.trim();
-      setReg('failed'); setRegError(msg); report(acct.id, 'failed', msg);
+      const code = e?.response?.status_code as number | undefined;
+      const msg = `Registration rejected${code ? ` (${code} ${e.response.reason_phrase ?? ''})` : ''}`.trim();
+      if (isCredentialRejection(code)) rejected.current.add(identity);
+      setReg('failed'); setRegError(isCredentialRejection(code) ? credentialRejectedMessage(code, e.response.reason_phrase) : msg); report(acct.id, 'failed', msg);
     });
     u.on('newRTCSession', (e: any) => {
       if (!cur()) return;
@@ -169,11 +215,30 @@ export function useSoftphone() {
       const c = await api.get<SoftphoneConfig>('/softphone/config');
       setConfig(c); setError(null);
       const a = c.accounts.find((x) => x.id === accountRef.current?.id) ?? c.accounts[0];
-      if (!a) { stopUa(); setReg('idle'); return; }
+      if (!a) {
+        // no usable account left (its call server was disabled): unregister so the call server stops sending us calls, and drop a call that is only ringing
+        const gone = accountRef.current?.id;
+        stopUa(); setReg('idle'); if (gone) report(gone, 'unregistered');
+        if (callRef.current.state === 'incoming') finishCall();
+        return;
+      }
       if (uaKey(a) !== keyRef.current && !callRef.current.callId) await startUa(a); // never tear down a live call
     } catch (e) { setError(errText(e, 'Could not load softphone settings')); }
     finally { setLoaded(true); }
-  }, [startUa, stopUa]);
+  }, [startUa, stopUa, report, finishCall]);
+
+  // Every few seconds ask which accounts are usable; any difference from what this softphone knows triggers an immediate refresh.
+  // This is what makes "disable the call server" take effect within seconds (unregister, no inbound calls) and "enable" bring it back.
+  useEffect(() => {
+    const t = setInterval(async () => {
+      try {
+        const { accountIds } = await api.get<{ accountIds: string[] }>('/softphone/active');
+        const known = (configRef.current?.accounts ?? []).map((x) => x.id).sort().join(',');
+        if (accountIds.slice().sort().join(',') !== known) void refresh();
+      } catch { /* offline: the normal refresh and retry loops cover it */ }
+    }, ACTIVE_CHECK_MS);
+    return () => clearInterval(t);
+  }, [refresh]);
 
   // login / mount, periodic refresh, tab focus, network back
   useEffect(() => {
@@ -187,7 +252,7 @@ export function useSoftphone() {
 
   // while not registered, retry and re-read the (possibly changed) server address
   useEffect(() => {
-    if (reg !== 'failed') return;
+    if (reg !== 'failed' || rejected.current.has(keyRef.current)) return; // a rejected password is not retried (registrationRetry.ts)
     const t = setInterval(() => { keyRef.current = ''; void refresh(); }, RETRY_MS);
     return () => clearInterval(t);
   }, [reg, refresh]);
@@ -197,7 +262,7 @@ export function useSoftphone() {
 
   /** Dials what the server returned (prefix already applied) and wires the call events. */
   const startCall = useCallback(async (placed: { callId: string; dialed: string; prefix: string; target: string }) => {
-    const s = await ua.current.call(placed.target, { mediaConstraints: { audio: true, video: false }, rtcOfferConstraints: { offerToReceiveAudio: true }, pcConfig: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } });
+    const s = await ua.current.call(placed.target, { mediaConstraints: mediaConstraints(), rtcOfferConstraints: { offerToReceiveAudio: true }, pcConfig: rtcConfig() });
     wireSession(s, { ...IDLE_CALL, state: 'dialing', number: placed.dialed, callId: placed.callId, note: placed.prefix ? `Prefix ${placed.prefix} applied` : null });
   }, [wireSession]);
 
@@ -243,8 +308,8 @@ export function useSoftphone() {
 
   const hangup = useCallback(() => { try { session.current?.terminate(); } catch { /* already ended */ } }, []);
   const answer = useCallback(() => {
-    try { session.current?.answer({ mediaConstraints: { audio: true, video: false } }); } catch (e) { setError(errText(e, 'Could not answer')); }
-  }, []);
+    try { session.current?.answer({ mediaConstraints: mediaConstraints(), pcConfig: rtcConfig() }); } catch (e) { setError(errText(e, 'Could not answer')); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const mute = useCallback(() => {
     const s = session.current; if (!s) return;
     const m = !callRef.current.muted;
@@ -253,5 +318,5 @@ export function useSoftphone() {
   }, []);
   const sendDtmf = useCallback((tone: string) => { try { session.current?.sendDTMF(tone); } catch { /* not connected */ } }, []);
 
-  return { config, account, accountId: account?.id ?? '', setAccountId, reg, regError, call, error, setError, loaded, dial, dialItem, hangup, answer, mute, sendDtmf, refresh, audio };
+  return { devices, micId, setMicId, speakerId, setSpeakerId, grantMic, sinkSupported, config, account, accountId: account?.id ?? '', setAccountId, reg, regError, call, error, setError, loaded, dial, dialItem, hangup, answer, mute, sendDtmf, refresh, audio };
 }
