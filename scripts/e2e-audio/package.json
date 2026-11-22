@@ -1,0 +1,7 @@
+{
+  "name": "dialer-e2e-audio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Headless two-agent WebRTC audio test: registers over WSS with JsSIP, calls, sends tones, measures what it receives. Run it against a PBX; it is not part of the pnpm workspace.",
+  "dependencies": { "@roamhq/wrtc": "^0.8.0", "jssip": "3.10.1", "ws": "^8.18.0" }
+}

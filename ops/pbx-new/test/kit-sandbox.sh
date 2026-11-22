@@ -11,6 +11,7 @@ printf '[general]\nenabled=yes\nbindaddr=0.0.0.0\n\n[other]\nx=1\n' > "$W/etc/ht
 printf '[general]\nrtpstart=12000\n' > "$W/etc/rtp.conf"
 printf '[logfiles]\nconsole => notice\n' > "$W/etc/logger.conf"
 printf '; p\n' > "$W/etc/pjsip.conf"; printf '[general]\n' > "$W/etc/extensions.conf"; printf '; acl\n' > "$W/etc/acl.conf"
+printf '[modules]\nautoload=yes\nnoload => chan_alsa.so\n\n[global]\n' > "$W/etc/modules.conf"; cp "$W/etc/modules.conf" "$W/orig-modules.conf"
 cp "$W/etc/http.conf" "$W/orig-http.conf"; cp "$W/etc/rtp.conf" "$W/orig-rtp.conf"; cp "$W/etc/logger.conf" "$W/orig-logger.conf"
 cp "$W/etc/pjsip.conf" "$W/orig-pjsip.conf"; cp "$W/etc/extensions.conf" "$W/orig-ext.conf"; cp "$W/etc/acl.conf" "$W/orig-acl.conf"
 printf 'DOMAIN=test-pbx.duckdns.org\nEMAIL=me@example.com\nDUCKDNS_TOKEN=abcdefabcdefabcdefab1234\nALLOW_PREFIXES=91,1\nDENY_PREFIXES=1900\nFAIL2BAN_IGNORE="203.0.113.7"\n' > "$W/env"
@@ -23,7 +24,10 @@ DRY_RUN=1 sh $KIT/pbx-setup.sh configure >/dev/null 2>&1; check "configure is id
 [ "$(grep -c '#include http_dialer.conf' "$W/etc/http.conf")" = 1 ]; check "http include appears once" $?
 awk '/^\[general\]/{g=1} g&&/#include http_dialer.conf/{inc=NR} /^\[other\]/{o=NR} END{exit !(inc && o && inc<o)}' "$W/etc/http.conf"; check "http include is inside [general], before [other]" $?
 awk '/^bindaddr/{b=NR} /#include http_dialer.conf/{i=NR} END{exit !(b<i)}' "$W/etc/http.conf"; check "our include comes AFTER the packaged bindaddr line (ours wins)" $?
+awk '/^\[general\]/{g=1} g&&/#include rtp_dialer.conf/{inc=NR} /^rtpstart/{r=NR} END{exit !(inc && r && inc<r)}' "$W/etc/rtp.conf"; check "rtp include comes BEFORE the packaged rtpstart (this module reads the FIRST value)" $?
+grep -q 'noload => chan_sip.so' "$W/etc/modules.conf" && awk '/noload => chan_sip.so/{n=NR} /^\[global\]/{g=NR} END{exit !(n && g && n<g)}' "$W/etc/modules.conf"; check "chan_sip is disabled inside [modules] (it would steal the browsers' WebSocket registrations)" $?
 grep -q 'REGEX("^(91|1)"' "$W/etc/extensions_dialer.conf"; check "dial plan has the allow-list" $?
+grep -qF 'GROUP(agent)=${CHANNEL(endpoint)}' "$W/etc/extensions_dialer.conf" && ! grep -q 'GROUP(agent)=${CALLERID' "$W/etc/extensions_dialer.conf"; check "per-agent call limit counts by the authenticated endpoint name (defence in depth), not the caller ID" $?
 grep -q 'REGEX("^(1900)"' "$W/etc/extensions_dialer.conf"; check "dial plan has the deny-list" $?
 grep -q 'Hangup(21)' "$W/etc/extensions_dialer.conf" && grep -q 'Hangup(34)' "$W/etc/extensions_dialer.conf"; check "refusals end with cause 21 / 34" $?
 DRY_RUN=1 sh $KIT/pbx-setup.sh harden >/dev/null 2>&1; check "harden writes jail + filter + logger include" $?
@@ -47,6 +51,7 @@ sh $KIT/add-agent.sh --remove 4002 >/dev/null 2>&1; check "remove agent 4002" $?
 export DRY_RUN=1
 printf 'n\n' | sh $KIT/pbx-setup.sh rollback >/dev/null 2>&1; check "rollback runs" $?
 for f in http rtp logger pjsip; do cmp -s "$W/etc/$f.conf" "$W/orig-$f.conf"; check "rollback restored $f.conf byte-identical" $?; done
+cmp -s "$W/etc/modules.conf" "$W/orig-modules.conf"; check "rollback restored modules.conf byte-identical" $?
 cmp -s "$W/etc/extensions.conf" "$W/orig-ext.conf"; check "rollback restored extensions.conf byte-identical" $?
 cmp -s "$W/etc/acl.conf" "$W/orig-acl.conf"; check "rollback restored acl.conf byte-identical" $?
 [ ! -e "$W/f2b/jail.d/pbx-asterisk.local" ]; check "rollback removed the fail2ban jail" $?

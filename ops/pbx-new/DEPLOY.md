@@ -1,5 +1,7 @@
 # Deployment guide: personal PBX (Ubuntu VPS) + browser dialer on Vercel
 
+> **Automated path:** `PRODUCTION.md` in this folder (one command, `deploy-remote.sh`, includes coturn, HTTP-01 certificates without a DuckDNS account, and a measured two-way audio test). This file is the manual, stage-by-stage version.
+
 For beginners. Follow the stages in order, compare each result with **"You should see"**, and **stop at the first difference**. Read `AUDIT.md` once before you start.
 
 ## Ground rules for this deployment
@@ -288,7 +290,7 @@ The Vercel project, build and deployment already exist (see `docs/deployment.md`
 | `RING_TIMEOUT_SECONDS` | `45` (repository default `5`, range 1-120) | **yes for real calls** | how long an outgoing call may ring before the Softphone cancels it; 5 s cannot work with people or phone numbers. Production setting: **not changed by me, needs your approval**; it is the same for everyone in the deployment |
 | `DEFAULT_SIP_TRANSPORT` | `wss` (repository default `udp`) | recommended | only used when an Excel call list names a server that does not exist yet (it is then created with this transport). Create the WSS call server first (stage 8b) and use its **host name** in the Excel, and this never matters |
 | `WEBRTC_STUN_URLS` | default `stun:stun.l.google.com:19302` | no | change only if you run your own STUN |
-| `WEBRTC_TURN_URLS`, `WEBRTC_TURN_USERNAME`, `WEBRTC_TURN_CREDENTIAL` | your TURN server | only if some agents hear no audio | the last two are secrets |
+| `WEBRTC_TURN_URLS` + `WEBRTC_TURN_SECRET` | your coturn server (`pbx-setup.sh turn` installs it and prints the values) | recommended for real internet use | the secret is shared with coturn; the API derives **short-lived** credentials per agent (`WEBRTC_TURN_TTL_SECONDS`, default 86400, range 300 to 604800). `WEBRTC_TURN_URLS` without the secret is refused at startup; fixed TURN passwords are not supported |
 
 Before the first agent signs in on the production site, run from your own PC (owner credentials stay on your PC, never in Vercel), in this order, with the production database named in your local `.env`: `pnpm db:migrate` (migrations up to 0012 must be applied: the code expects them), then `pnpm db:setup-roles` (creates the two runtime database users with the passwords from your local `.env`), then create the first company and administrator: `PROVISION_ADMIN_PASSWORD=<a strong password> pnpm --filter @dialer/api provision -- --slug <company-id> --name "<Company name>" --email <admin e-mail> --admin-name "<Admin name>"` (type the password without saving it in shell history). Redeploy after changing variables. Until `DB_HOST`, `DB_NAME` and `DB_USER_PREFIX` are set for production the API answers `503` and names the missing settings: that is expected.
 

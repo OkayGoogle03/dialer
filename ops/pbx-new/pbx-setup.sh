@@ -5,15 +5,20 @@
 #   sudo sh pbx-setup.sh preflight     read-only: OS, public IP, NAT, ports in use, what is already installed  (changes nothing)
 #   sudo sh pbx-setup.sh install       apt install asterisk certbot curl ufw fail2ban ; checks WSS/WebRTC modules are present
 #   sudo sh pbx-setup.sh dns           DuckDNS: point the name at this server + keep it updated (cron)
-#   sudo sh pbx-setup.sh certificate   Let's Encrypt certificate (DNS-01 through DuckDNS) + renewal hook
+#   sudo sh pbx-setup.sh certificate   Let's Encrypt certificate + renewal hook (DNS-01 through DuckDNS when DUCKDNS_TOKEN is set, otherwise HTTP-01 on port 80)
 #   sudo sh pbx-setup.sh configure     snapshot of /etc/asterisk, then writes OUR files and includes them; auto-reverts if verification fails
+#   sudo sh pbx-setup.sh turn          coturn (TURN relay for agents behind strict NAT / firewalls): short-lived credentials from a shared secret, certificate, systemd
 #   sudo sh pbx-setup.sh harden        fail2ban against SIP brute force (Asterisk security log + jail), SSH jail stays on
 #   sudo sh pbx-setup.sh firewall      prints the ufw plan; apply with:  sudo sh pbx-setup.sh firewall --yes
+#   sudo sh pbx-setup.sh all           install, dns, certificate, configure, turn, harden, firewall --yes, status in one go (non-interactive; used by deploy-remote.sh)
+#   sudo sh pbx-setup.sh health        checks services, listeners, certificate expiry, disk (exit status 1 on a problem); 'monitor' installs a 5-minute systemd timer for it
 #   sudo sh pbx-setup.sh status        health report (also compares the certificate Asterisk SERVES with the one on disk)
 #   sudo sh pbx-setup.sh rollback      removes everything these stages added (asks before deleting the certificate)
 #
 # Settings go in /etc/pbx-setup.env (root:root, mode 600, the script refuses anything looser):
 #   DOMAIN=your-pbx-name.duckdns.org   EMAIL=you@example.com   DUCKDNS_TOKEN=xxxxxxxx
+#   # no DuckDNS account? DOMAIN=<ip with dashes>.sslip.io (for 203.0.113.5: 203-0-113-5.sslip.io) and no DUCKDNS_TOKEN: the certificate then uses HTTP-01 on port 80
+#   # CERT_MODE=dns|http (default: dns when DUCKDNS_TOKEN is set, otherwise http)   TURN_MIN_PORT=49152  TURN_MAX_PORT=49252
 #   # optional:  CERTBOT_STAGING=1  RTP_START=10000  RTP_END=20000  WSS_PORT=8089  SSH_PORT=22  STRIP_PREFIX=0
 #   # outgoing calls (toll-fraud protection). With ALLOW_PREFIXES empty NO call may leave through the trunk:
 #   #   ALLOW_PREFIXES=91,1       digits a number must START with (after STRIP_PREFIX), comma separated
@@ -49,7 +54,7 @@ load_env() {
     key="${line%%=*}"; val="${line#*=}"
     [ "$key" != "$line" ] || die "$ENV_FILE: a line without '=' (lines must be KEY=VALUE or start with #)"
     case "$key" in
-      DOMAIN|EMAIL|DUCKDNS_TOKEN|CERTBOT_STAGING|RTP_START|RTP_END|WSS_PORT|SSH_PORT|STRIP_PREFIX|MAX_OUTBOUND|MAX_PER_AGENT|MAX_CALL_SECONDS|ALLOW_PREFIXES|DENY_PREFIXES|FAIL2BAN_IGNORE) ;;
+      DOMAIN|EMAIL|DUCKDNS_TOKEN|ALERT_URL|CERT_MODE|TURN_MIN_PORT|TURN_MAX_PORT|CERTBOT_STAGING|RTP_START|RTP_END|WSS_PORT|SSH_PORT|STRIP_PREFIX|MAX_OUTBOUND|MAX_PER_AGENT|MAX_CALL_SECONDS|ALLOW_PREFIXES|DENY_PREFIXES|FAIL2BAN_IGNORE) ;;
       *) die "$ENV_FILE: unknown setting '$key'" ;;
     esac
     val="${val#\"}"; val="${val%\"}"; val="${val#\'}"; val="${val%\'}"
@@ -58,12 +63,18 @@ load_env() {
   : "${DOMAIN:?DOMAIN missing in $ENV_FILE}" "${EMAIL:?EMAIL missing in $ENV_FILE}"
   RTP_START="${RTP_START:-10000}"; RTP_END="${RTP_END:-20000}"; WSS_PORT="${WSS_PORT:-8089}"; SSH_PORT="${SSH_PORT:-22}"
   STRIP_PREFIX="${STRIP_PREFIX:-0}"; MAX_OUTBOUND="${MAX_OUTBOUND:-5}"; MAX_PER_AGENT="${MAX_PER_AGENT:-2}"; MAX_CALL_SECONDS="${MAX_CALL_SECONDS:-3600}"
+  TURN_MIN_PORT="${TURN_MIN_PORT:-49152}"; TURN_MAX_PORT="${TURN_MAX_PORT:-49252}"
+  if [ -z "${CERT_MODE:-}" ]; then if [ -n "${DUCKDNS_TOKEN:-}" ]; then CERT_MODE=dns; else CERT_MODE=http; fi; fi
+  case "$CERT_MODE" in dns|http) ;; *) die "CERT_MODE must be dns or http (got '$CERT_MODE')" ;; esac
+  [ "$CERT_MODE" = http ] || [ -n "${DUCKDNS_TOKEN:-}" ] || die "CERT_MODE=dns needs DUCKDNS_TOKEN"
   ALLOW_PREFIXES="${ALLOW_PREFIXES:-}"; DENY_PREFIXES="${DENY_PREFIXES:-}"; FAIL2BAN_IGNORE="${FAIL2BAN_IGNORE:-}"
-  for v in RTP_START RTP_END WSS_PORT SSH_PORT STRIP_PREFIX MAX_OUTBOUND MAX_PER_AGENT MAX_CALL_SECONDS; do eval "num $v \"\$$v\""; done
+  for v in RTP_START RTP_END WSS_PORT SSH_PORT STRIP_PREFIX MAX_OUTBOUND MAX_PER_AGENT MAX_CALL_SECONDS TURN_MIN_PORT TURN_MAX_PORT; do eval "num $v \"\$$v\""; done
   # destination rules go into the dial plan: digits only, comma separated
   for v in ALLOW_PREFIXES DENY_PREFIXES; do eval "val=\$$v"; [ -z "$val" ] || printf '%s' "$val" | grep -Eq '^[0-9]+(,[0-9]+)*$' || die "$v must be digits separated by commas, for example 91,1 (got '$val')"; done
   for a in $(printf '%s' "$FAIL2BAN_IGNORE" | tr ',' ' '); do printf '%s' "$a" | grep -Eq '^[0-9a-fA-F:.]+(/[0-9]{1,3})?$' || die "FAIL2BAN_IGNORE: '$a' is not an address or CIDR"; done
   [ "$RTP_START" -lt "$RTP_END" ] || die "RTP_START must be lower than RTP_END"
+  [ -z "${ALERT_URL:-}" ] || printf '%s' "$ALERT_URL" | grep -Eq '^https?://[A-Za-z0-9._~:/?#@%+=,-]+$' || die "ALERT_URL must be a plain http(s) URL"
+  [ "$TURN_MIN_PORT" -lt "$TURN_MAX_PORT" ] || die "TURN_MIN_PORT must be lower than TURN_MAX_PORT"
   # values end up inside shell commands and config files: accept only plain host / e-mail characters
   printf '%s' "$DOMAIN" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' || die "DOMAIN is not a plain lower-case host name"
   printf '%s' "$EMAIL" | grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' || die "EMAIL looks invalid"
@@ -71,7 +82,7 @@ load_env() {
 }
 
 ast() { if command -v asterisk >/dev/null 2>&1; then asterisk -rx "$1"; else echo "(asterisk not installed)"; fi; }
-public_ip() { curl -4 -fsS -m 8 https://api.ipify.org 2>/dev/null || true; }
+public_ip() { if [ -n "${PBX_PUBLIC_IP:-}" ]; then printf '%s' "$PBX_PUBLIC_IP"; return; fi; curl -4 -fsS -m 8 https://api.ipify.org 2>/dev/null || true; }   # PBX_PUBLIC_IP: set it when the automatic lookup is wrong (or for tests)
 local_ips() { ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1; }
 
 # ---- files: first-original backup, include handling
@@ -83,16 +94,23 @@ snapshot() { # timestamped copy of the whole configuration (the restore point us
   tar czf "$f" -C / "${ETC#/}" 2>/dev/null; chmod 600 "$f"
   say "Snapshot of $ETC saved: $f   (restore: tar xzf $f -C / && asterisk -rx 'core reload')"
 }
-add_include() { # add_include <file> <include name> [section]: idempotent. With a section, the include goes INSIDE that section.
-  # Asterisk reads only the FIRST [general] of a file, so an included [general] block would be ignored. The include goes at the
-  # END of the section (just before the next header, or at the end of the file): when a setting appears twice in one section the
-  # LAST one wins, so our values must come after anything the packaged file already sets (rtpstart, bindaddr, ...).
-  f="$1"; inc="$2"; sec="${3:-}"
+add_include() { # add_include <file> <include name> [section [top]]: idempotent. With a section, the include goes INSIDE that section.
+  # Asterisk reads only the FIRST [general] of a file, so an included [general] block would be ignored. Where the include goes depends on
+  # how the module reads duplicates, which differs per module (verified on Asterisk 20.6):
+  #   default  END of the section: modules that walk all variables take the LAST value (http.conf), so ours must come after the packaged ones.
+  #   top      right after the header: res_rtp_asterisk reads rtpstart / rtpend with ast_variable_retrieve = the FIRST value, so ours must come first.
+  f="$1"; inc="$2"; sec="${3:-}"; pos="${4:-end}"
   touch "$f"
   grep -qF "#include $inc" "$f" && return 0
   backup_once "$f"
   if [ -z "$sec" ]; then printf '\n; added by pbx-setup\n#include %s\n' "$inc" >> "$f"; return 0; fi
-  if grep -q "^\[$sec\]" "$f"; then
+  if [ "$pos" = top ] && grep -q "^\[$sec\]" "$f"; then
+    # no blank lines in this form, so remove_include restores the file byte-identical
+    awk -v sec="[$sec]" -v inc="$inc" '
+      !done && $0 == sec { print; print "; added by pbx-setup"; print "#include " inc; done = 1; next }
+      { print }' "$f" > "$f.tmp"
+    cat "$f.tmp" > "$f"; rm -f "$f.tmp"
+  elif grep -q "^\[$sec\]" "$f"; then
     awk -v sec="[$sec]" -v inc="$inc" '
       function put() { if (insec && !done) { print ""; print "; added by pbx-setup"; print "#include " inc; done = 1 } }
       !done && $0 == sec { insec = 1; print; next }
@@ -116,6 +134,28 @@ remove_include() { # removes our include line, the marker comment right above it
   cat "$f.tmp" > "$f"; rm -f "$f.tmp"
 }
 reload_pbx() { command -v asterisk >/dev/null 2>&1 || return 0; for m in http res_pjsip.so res_rtp_asterisk.so; do asterisk -rx "module reload $m" >/dev/null; done; asterisk -rx "dialplan reload" >/dev/null; asterisk -rx "logger reload" >/dev/null; }
+# Oracle Cloud Ubuntu images ship an iptables ruleset that rejects everything except SSH, and it sits in front of ufw: nothing we open would
+# be reachable. On those images (recognised by the chassis asset tag) the ruleset is cleared; ufw (SSH allowed first) takes over afterwards.
+# The provider's own security list / network security group still has to allow the ports.
+oci_prepare() {
+  [ "$DRY" = 1 ] && return 0
+  [ "$(cat /sys/devices/virtual/dmi/id/chassis_asset_tag 2>/dev/null)" = "OracleCloud.com" ] || return 0
+  iptables -S INPUT 2>/dev/null | grep -q "icmp-host-prohibited" || return 0
+  say "Oracle Cloud image detected: clearing its default iptables REJECT ruleset (ufw takes over; SSH is allowed first)."
+  for p in $(sshd -T 2>/dev/null | awk '/^port /{print $2}' | sort -u) "$SSH_PORT"; do iptables -I INPUT 1 -p tcp --dport "$p" -j ACCEPT; done
+  iptables -P INPUT ACCEPT; iptables -F INPUT; iptables -F FORWARD 2>/dev/null || true
+  ip6tables -P INPUT ACCEPT 2>/dev/null || true; ip6tables -F INPUT 2>/dev/null || true
+  command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true
+}
+# chan_sip (Ubuntu loads it by default) also registers the 'sip' WebSocket sub-protocol and answers browsers' REGISTER with "wrong password" before PJSIP
+# ever sees it (found in a clean-room test); it also holds UDP 5060, which the trunk transport needs. Neither it nor chan_iax2 is used by this kit.
+disable_chan_sip() {
+  f="$ETC/modules.conf"; [ -f "$f" ] || return 0
+  grep -Eq '^[[:space:]]*noload[[:space:]]*=>[[:space:]]*chan_sip.so' "$f" && return 0
+  backup_once "$f"
+  awk '/^\[modules\]/{inm=1} inm && /^\[global\]/ && !d {print "; added by pbx-setup"; print "noload => chan_sip.so"; print "noload => chan_iax2.so"; print ""; d=1; inm=0} {print} END{ if(!d){print "; added by pbx-setup"; print "noload => chan_sip.so"; print "noload => chan_iax2.so"} }' "$f" > "$f.tmp"
+  cat "$f.tmp" > "$f"; rm -f "$f.tmp"; CHAN_SIP_CHANGED=1
+}
 asterisk_own() { chown asterisk:asterisk "$@" 2>/dev/null || true; chmod 640 "$@"; }
 
 # ------------------------------------------------------------------------------------------------ preflight
@@ -182,10 +222,21 @@ stage_dns() {
 # ------------------------------------------------------------------------------------------------ certificate
 stage_certificate() {
   need_root; load_env
-  [ -r /etc/duckdns.env ] || [ "$DRY" = 1 ] || die "run the dns stage first (it stores the DuckDNS token for the validation hook)"
-  run "install -m 0755 '$HERE/../pbx/duckdns-certbot-hook.sh' /usr/local/sbin/duckdns-certbot-hook.sh"
+  if [ "$CERT_MODE" = dns ]; then
+    [ -r /etc/duckdns.env ] || [ "$DRY" = 1 ] || die "run the dns stage first (it stores the DuckDNS token for the validation hook)"
+    run "install -m 0755 '$HERE/../pbx/duckdns-certbot-hook.sh' /usr/local/sbin/duckdns-certbot-hook.sh"
+  else
+    # HTTP-01: certbot answers the challenge itself on port 80, so the name must already point at this server and port 80 must be reachable
+    oci_prepare
+    pub="$(public_ip)"; got="$(getent hosts "$DOMAIN" | awk '{print $1}' | head -1)"
+    [ "$DRY" = 1 ] || [ -z "$pub" ] || [ "$got" = "$pub" ] || die "$DOMAIN resolves to '${got:-nothing}' but this server's public IP is $pub: HTTP-01 cannot succeed (for an sslip.io name use the IP written with dashes)"
+  fi
   staging=""; [ "${CERTBOT_STAGING:-0}" = 1 ] && staging="--staging" && say "Using the Let's Encrypt STAGING environment (practice certificate, NOT trusted by browsers). Before going live: certbot delete --cert-name $DOMAIN, remove CERTBOT_STAGING, rerun this stage."
-  run "certbot certonly --manual --preferred-challenges dns -d '$DOMAIN' --manual-auth-hook '/usr/local/sbin/duckdns-certbot-hook.sh auth' --manual-cleanup-hook '/usr/local/sbin/duckdns-certbot-hook.sh cleanup' --agree-tos -m '$EMAIL' --non-interactive $staging"
+  if [ "$CERT_MODE" = dns ]; then
+    run "certbot certonly --manual --preferred-challenges dns -d '$DOMAIN' --manual-auth-hook '/usr/local/sbin/duckdns-certbot-hook.sh auth' --manual-cleanup-hook '/usr/local/sbin/duckdns-certbot-hook.sh cleanup' --agree-tos -m '$EMAIL' --non-interactive --keep-until-expiring $staging"
+  else
+    run "certbot certonly --standalone --preferred-challenges http --http-01-port 80 -d '$DOMAIN' --agree-tos -m '$EMAIL' --non-interactive --keep-until-expiring $staging"
+  fi
   # the folder Asterisk reads: owned by asterisk, not world-readable (the umask of root must not turn it into a root-only folder)
   run "install -d -o asterisk -g asterisk -m 0750 '$KEYDIR'"
   run "install -m 0755 '$HERE/../pbx/certbot-deploy-hook.sh' /etc/letsencrypt/renewal-hooks/deploy/pbx-wss.sh"
@@ -210,6 +261,7 @@ stage_configure() {
   snapshot
   mkdir -p "$STATE"
   for f in http.conf pjsip.conf rtp.conf extensions.conf; do backup_once "$ETC/$f"; done
+  CHAN_SIP_CHANGED=0; disable_chan_sip
 
   # --- NAT: if the public IP is not on this server, Asterisk must advertise it in SIP/SDP and in the ICE candidates
   pub="$(public_ip)"; nat=""; ice=""
@@ -304,9 +356,10 @@ EOF
 EOF
     if [ -n "$DENY_PREFIXES" ]; then printf ' same => n,GotoIf($[${REGEX("^(%s)" ${NUM})}]?denied)\n' "$deny_re"; fi
     if [ -n "$ALLOW_PREFIXES" ]; then printf ' same => n,GotoIf($[${REGEX("^(%s)" ${NUM})} = 0]?denied)\n' "$allow_re"; else printf ' same => n,Goto(denied)\n'; fi
-    printf ' same => n,Set(GROUP()=outbound)\n same => n,Set(GROUP(agent)=${CALLERID(num)})\n'
+    # the per-agent limit counts by the AUTHENTICATED endpoint name, never by the caller ID (that comes from the SIP From header and could be spoofed)
+    printf ' same => n,Set(GROUP()=outbound)\n same => n,Set(GROUP(agent)=${CHANNEL(endpoint)})\n'
     printf ' same => n,GotoIf($[${GROUP_COUNT(outbound)} > %s]?limit)\n' "$MAX_OUTBOUND"
-    printf ' same => n,GotoIf($[${GROUP_COUNT(${CALLERID(num)}@agent)} > %s]?limit)\n' "$MAX_PER_AGENT"
+    printf ' same => n,GotoIf($[${GROUP_COUNT(${CHANNEL(endpoint)}@agent)} > %s]?limit)\n' "$MAX_PER_AGENT"
     printf ' same => n,Set(TIMEOUT(absolute)=%s)\n' "$MAX_CALL_SECONDS"
     cat <<'EOF'
  same => n,Dial(PJSIP/${NUM}@trunk-out,60)
@@ -325,13 +378,19 @@ EOF
   [ -f "$ETC/extensions_trunk_in.conf" ] || printf '; inbound calls from the trunk (add-trunk.sh)\n' > "$ETC/extensions_trunk_in.conf"
 
   add_include "$ETC/http.conf" http_dialer.conf general
-  add_include "$ETC/rtp.conf" rtp_dialer.conf general
+  add_include "$ETC/rtp.conf" rtp_dialer.conf general top
   [ -z "$ice" ] || add_include "$ETC/rtp.conf" rtp_ice_dialer.conf
   add_include "$ETC/pjsip.conf" pjsip_dialer.conf
   add_include "$ETC/extensions.conf" extensions_dialer.conf
   [ "$DRY" = 1 ] && { say "DRY-RUN: files written under $ETC; not reloading."; return 0; }
   asterisk_own "$ETC"/*_dialer.conf "$ETC"/pjsip_agents.conf "$ETC"/pjsip_trunk.conf "$ETC"/extensions_trunk_in.conf
 
+  # modules cannot be unloaded safely with calls running; at this stage the server is new, so a restart is fine
+  if [ "${CHAN_SIP_CHANGED:-0}" = 1 ] || { command -v asterisk >/dev/null 2>&1 && asterisk -rx "module show like chan_sip" | grep -q " Running"; }; then
+    say "Disabling chan_sip / chan_iax2 (restarting Asterisk once)."
+    systemctl restart asterisk
+    i=0; until asterisk -rx "core show version" >/dev/null 2>&1; do i=$((i+1)); [ $i -lt 30 ] || die "asterisk did not come back after the restart: systemctl status asterisk"; sleep 2; done
+  fi
   # --- reload only what changed, then verify. If verification fails the includes are removed again (the system returns to how it was).
   reload_pbx
   sleep 2
@@ -350,6 +409,82 @@ EOF
     exit 1
   fi
   say "OK: WSS listener on $WSS_PORT and transport-wss are active. Next: harden, firewall, add agents (add-agent.sh), then test from outside with scripts/check-pbx-wss.mjs."
+}
+
+# ------------------------------------------------------------------------------------------------ turn (coturn)
+# A TURN relay lets agents whose network blocks direct UDP (symmetric NAT, corporate firewalls, some mobile carriers) still exchange audio: the
+# browser sends its media to this server and coturn forwards it to Asterisk. Credentials are short-lived: the Dialer API derives them from the
+# shared secret below (TURN REST API, WEBRTC_TURN_SECRET), so the secret never reaches a browser.
+stage_turn() {
+  need_root; load_env
+  [ -r "$KEYDIR/pbx.crt" ] || [ "$DRY" = 1 ] || die "no certificate in $KEYDIR yet: run the certificate stage first"
+  run "DEBIAN_FRONTEND=noninteractive apt-get install -y coturn"
+  [ "$DRY" = 1 ] && { say "DRY-RUN: would write /etc/turnserver.conf and start coturn"; return 0; }
+  priv="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)"
+  [ -n "$priv" ] || die "cannot determine this server's own address for coturn"
+  pub="$(public_ip)"
+  mkdir -p "$STATE"; chmod 700 "$STATE"
+  if [ ! -s "$STATE/turn-secret" ]; then ( umask 077; head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | cut -c1-40 > "$STATE/turn-secret" ); fi
+  secret="$(cat "$STATE/turn-secret")"
+  extip=""; [ -n "$pub" ] && [ "$pub" != "$priv" ] && extip="external-ip=$pub/$priv"
+  # coturn runs as its own user: it gets its own copy of the certificate (the renewal hook refreshes it)
+  install -d -o turnserver -g turnserver -m 0750 /etc/coturn/certs
+  install -o turnserver -g turnserver -m 0640 "$KEYDIR/pbx.crt" /etc/coturn/certs/pbx.crt
+  install -o turnserver -g turnserver -m 0600 "$KEYDIR/pbx.key" /etc/coturn/certs/pbx.key
+  [ -f /etc/turnserver.conf ] && [ ! -f /etc/turnserver.conf.before-pbx-setup ] && cp -a /etc/turnserver.conf /etc/turnserver.conf.before-pbx-setup
+  ( umask 027; cat > /etc/turnserver.conf <<EOF
+# written by pbx-setup (stage turn). Remove this file (or run rollback) to undo.
+listening-port=3478
+tls-listening-port=5349
+fingerprint
+use-auth-secret
+static-auth-secret=$secret
+realm=$DOMAIN
+server-name=$DOMAIN
+$extip
+min-port=$TURN_MIN_PORT
+max-port=$TURN_MAX_PORT
+total-quota=100
+stale-nonce=600
+cert=/etc/coturn/certs/pbx.crt
+pkey=/etc/coturn/certs/pbx.key
+no-cli
+no-tlsv1
+no-tlsv1_1
+no-multicast-peers
+# WebRTC only needs UDP relaying; RFC 6062 TCP relaying (a way to make the server open TCP connections for a client) is switched off
+no-tcp-relay
+user-quota=12
+# a relay must never reach into the hosting network: every private / special range is denied, except this server's own address,
+# which is where Asterisk receives the relayed audio
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.0.0.0-192.0.0.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=::1
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+allowed-peer-ip=$priv
+simple-log
+EOF
+  )
+  chown root:turnserver /etc/turnserver.conf; chmod 640 /etc/turnserver.conf
+  # older coturn packages start only when /etc/default/coturn says so (the line is commented out by default)
+  if [ -f /etc/default/coturn ]; then
+    if grep -Eq '^#?[[:space:]]*TURNSERVER_ENABLED=' /etc/default/coturn; then sed -i -E 's/^#?[[:space:]]*TURNSERVER_ENABLED=.*/TURNSERVER_ENABLED=1/' /etc/default/coturn
+    else printf 'TURNSERVER_ENABLED=1\n' >> /etc/default/coturn; fi
+  fi
+  systemctl enable coturn >/dev/null 2>&1 || true
+  systemctl restart coturn
+  i=0; until ss -lnu 2>/dev/null | grep -q ':3478 '; do i=$((i+1)); [ $i -lt 10 ] || { journalctl -u coturn --no-pager -n 15 >&2; die "coturn is not listening on 3478/udp"; }; sleep 1; done
+  say "OK: coturn is running (3478 udp/tcp, 5349 tls, relay ports $TURN_MIN_PORT-$TURN_MAX_PORT/udp), enabled at boot."
+  say "In the Dialer API environment set:"
+  say "  WEBRTC_TURN_URLS=turn:$DOMAIN:3478?transport=udp,turn:$DOMAIN:3478?transport=tcp,turns:$DOMAIN:5349?transport=tcp"
+  say "  WEBRTC_TURN_SECRET=<the value in $STATE/turn-secret (root only; never put it in the repository)>"
 }
 
 # ------------------------------------------------------------------------------------------------ harden (brute force protection)
@@ -402,15 +537,25 @@ $SSH_PORT"
   say "  default: deny incoming, allow outgoing"
   say "  allow ${WSS_PORT}/tcp           (SIP over WSS from browsers)"
   say "  allow ${RTP_START}:${RTP_END}/udp  (audio)"
-  say "  (3478 / 5349 for TURN are NOT opened; add them only if you install TURN later: docs/pbx-wss-letsencrypt.md, section 6)"
+  [ "$CERT_MODE" = http ] && say "  allow 80/tcp                  (Let's Encrypt HTTP-01 validation and renewals)"
+  if command -v turnserver >/dev/null 2>&1; then
+    say "  allow 3478/udp, 3478/tcp, 5349/tcp   (TURN relay)"
+    say "  allow ${TURN_MIN_PORT}:${TURN_MAX_PORT}/udp  (TURN relay media)"
+  fi
   say "  5060/udp is NOT opened: the trunk registers outward and the provider's calls come back through that registration."
   say "ALSO open the same ports in your hosting provider's own firewall / security group, otherwise nothing reaches the server."
   [ "${1:-}" = "--yes" ] || { say; say "Nothing changed. To apply: sudo sh pbx-setup.sh firewall --yes"; return 0; }
+  oci_prepare
   for p in $sshports; do run "ufw limit ${p}/tcp comment 'pbx-setup ssh'"; done
   run "ufw default deny incoming"
   run "ufw default allow outgoing"
   run "ufw allow ${WSS_PORT}/tcp comment 'pbx-setup wss'"
   run "ufw allow ${RTP_START}:${RTP_END}/udp comment 'pbx-setup rtp'"
+  [ "$CERT_MODE" = http ] && run "ufw allow 80/tcp comment 'pbx-setup http-01'"
+  if command -v turnserver >/dev/null 2>&1; then
+    run "ufw allow 3478/udp comment 'pbx-setup turn'"; run "ufw allow 3478/tcp comment 'pbx-setup turn'"; run "ufw allow 5349/tcp comment 'pbx-setup turns'"
+    run "ufw allow ${TURN_MIN_PORT}:${TURN_MAX_PORT}/udp comment 'pbx-setup turn relay'"
+  fi
   run "ufw --force enable"
   run "ufw status numbered"
 }
@@ -424,9 +569,75 @@ stage_status() {
   say; say "== Certificate Asterisk is SERVING (must have the same serial as the file on disk)"
   openssl s_client -connect "127.0.0.1:$WSS_PORT" -servername "$DOMAIN" </dev/null 2>/dev/null | openssl x509 -noout -serial -enddate 2>/dev/null || say "could not read the served certificate (is the HTTPS listener up?)"
   say; say "== DNS"; getent hosts "$DOMAIN" || say "$DOMAIN does not resolve yet"; say "public IP: $(public_ip)"
+  say; say "== TURN (coturn)"; if command -v turnserver >/dev/null 2>&1; then say "coturn: $(systemctl is-active coturn 2>/dev/null) / enabled at boot: $(systemctl is-enabled coturn 2>/dev/null)"; if ss -lnu 2>/dev/null | grep -q ':3478 '; then say "listening on 3478/udp and 3478/5349 tcp"; else say "NOT listening on 3478/udp"; fi; else say "coturn not installed (run the turn stage)"; fi
+  say "Asterisk: $(systemctl is-active asterisk 2>/dev/null) / enabled at boot: $(systemctl is-enabled asterisk 2>/dev/null)   fail2ban: $(systemctl is-active fail2ban 2>/dev/null) / $(systemctl is-enabled fail2ban 2>/dev/null)"
   say; say "== Firewall"; command -v ufw >/dev/null && ufw status | head -15
   say; say "== fail2ban"; command -v fail2ban-client >/dev/null && fail2ban-client status 2>/dev/null | head -5
   say; say "Check from OUTSIDE your server (phone on mobile data, other network):  node scripts/check-pbx-wss.mjs $DOMAIN $WSS_PORT /ws"
+}
+
+# ------------------------------------------------------------------------------------------------ health + monitoring
+# Exit status 0 = healthy, 1 = a problem (one "PROBLEM:" line each). --quiet prints problems only (used by the systemd timer, which logs them to the journal
+# as 'pbx-health'). When ALERT_URL is set in /etc/pbx-setup.env the problem list is also POSTed there (for example a free ntfy.sh topic).
+stage_health() {
+  load_env
+  QUIET=0; RETRY=0
+  for a in "$@"; do case "$a" in --quiet) QUIET=1 ;; --retry) QUIET=1; RETRY=1 ;; esac; done
+  # --retry (the timer): a problem must still be there 20 s later before anything is logged or sent, so a service that is being restarted
+  # (certificate renewal restarts coturn; a package upgrade restarts Asterisk) does not raise a false alarm
+  bad=0; problems=""
+  chk() { # chk <what> <ok|reason>
+    if [ "$2" = ok ]; then [ "$QUIET" = 1 ] || say "ok: $1"; else [ "$RETRY" = 1 ] || say "PROBLEM: $1: $2"; bad=1; problems="$problems
+$1: $2"; fi
+    return 0
+  }
+  svcs="asterisk fail2ban"; command -v turnserver >/dev/null 2>&1 && svcs="$svcs coturn"
+  for s in $svcs; do st="$(systemctl is-active "$s" 2>/dev/null || true)"; if [ "$st" = active ]; then chk "$s service" ok; else chk "$s service" "${st:-unknown}"; fi; done
+  if ss -lnt 2>/dev/null | grep -q ":$WSS_PORT "; then chk "WSS listener on $WSS_PORT/tcp" ok; else chk "WSS listener on $WSS_PORT/tcp" "not listening"; fi
+  if asterisk -rx "pjsip show transports" 2>/dev/null | grep -q transport-wss; then chk "PJSIP transport-wss" ok; else chk "PJSIP transport-wss" "not loaded"; fi
+  if command -v turnserver >/dev/null 2>&1; then if ss -lnu 2>/dev/null | grep -q ':3478 '; then chk "TURN listener on 3478/udp" ok; else chk "TURN listener on 3478/udp" "not listening"; fi; fi
+  end="$(openssl s_client -connect "127.0.0.1:$WSS_PORT" -servername "$DOMAIN" </dev/null 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+  if [ -z "$end" ]; then chk "certificate served on $WSS_PORT" "cannot be read"
+  else days=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 )); if [ "$days" -ge 14 ]; then chk "certificate valid for $days more days" ok; else chk "certificate" "expires in $days days (is renewal working? run: certbot renew --dry-run)"; fi; fi
+  use="$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc 0-9)"; if [ -n "$use" ] && [ "$use" -lt 90 ]; then chk "disk usage ${use}%" ok; else chk "disk usage" "${use:-?}% (90% or more)"; fi
+  if [ "$bad" = 1 ] && [ "$RETRY" = 1 ]; then sleep 20; exec sh "$0" health --quiet; fi
+  if [ "$bad" = 1 ]; then
+    command -v logger >/dev/null 2>&1 && logger -t pbx-health "problems on $DOMAIN:$problems"
+    [ -z "${ALERT_URL:-}" ] || curl -fsS -m 10 -H "Title: PBX $DOMAIN needs attention" -d "$problems" "$ALERT_URL" >/dev/null 2>&1 || true
+    return 1
+  fi
+  return 0
+}
+stage_monitor() { # copy of this script + a systemd timer that runs the health check every 5 minutes and after boot
+  need_root
+  run "install -m 0755 '$HERE/pbx-setup.sh' /usr/local/sbin/pbx-setup.sh"
+  [ "$DRY" = 1 ] && { say "DRY-RUN: would install pbx-health.service and pbx-health.timer"; return 0; }
+  # crash recovery: a service whose unit does not restart itself gets a bounded restart (5 s pause; systemd's start limit stops a crash loop)
+  for u in asterisk coturn fail2ban; do
+    systemctl cat "$u" >/dev/null 2>&1 || continue
+    r="$(systemctl show "$u" -p Restart --value 2>/dev/null || true)"
+    if [ -z "$r" ] || [ "$r" = no ]; then
+      mkdir -p "/etc/systemd/system/$u.service.d"; printf '# written by pbx-setup\n[Service]\nRestart=on-failure\nRestartSec=5\n' > "/etc/systemd/system/$u.service.d/pbx-restart.conf"
+    fi
+  done
+  cat > /etc/systemd/system/pbx-health.service <<'EOF'
+[Unit]
+Description=PBX health check (Asterisk, coturn, fail2ban, certificate, disk)
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /usr/local/sbin/pbx-setup.sh health --retry
+EOF
+  cat > /etc/systemd/system/pbx-health.timer <<'EOF'
+[Unit]
+Description=Run the PBX health check every 5 minutes
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl daemon-reload; systemctl enable --now pbx-health.timer >/dev/null 2>&1
+  say "OK: pbx-health.timer is active (problems go to the journal:  journalctl -t pbx-health ; optional webhook: ALERT_URL in $ENV_FILE)."
 }
 
 # ------------------------------------------------------------------------------------------------ rollback
@@ -436,6 +647,7 @@ stage_rollback() {
   remove_include "$ETC/http.conf" http_dialer.conf; remove_include "$ETC/pjsip.conf" pjsip_dialer.conf
   remove_include "$ETC/rtp.conf" rtp_dialer.conf; remove_include "$ETC/rtp.conf" rtp_ice_dialer.conf; remove_include "$ETC/extensions.conf" extensions_dialer.conf
   remove_include "$ETC/acl.conf" acl_agents.conf; remove_include "$ETC/logger.conf" logger_dialer.conf
+  [ -f "$ETC/modules.conf.before-pbx-setup" ] && cp -a "$ETC/modules.conf.before-pbx-setup" "$ETC/modules.conf"
   for f in http pjsip rtp extensions logger acl; do [ -f "$ETC/$f.conf.before-pbx-setup" ] && say "original of $f.conf is kept as $f.conf.before-pbx-setup"; done
   stamp="$(date +%Y%m%d-%H%M%S)"; removed="$STATE/removed-$stamp"; mkdir -p "$removed"; chmod 700 "$removed"
   for f in http_dialer.conf pjsip_dialer.conf rtp_dialer.conf rtp_ice_dialer.conf extensions_dialer.conf extensions_trunk_in.conf pjsip_trunk.conf pjsip_agents.conf acl_agents.conf logger_dialer.conf; do
@@ -445,6 +657,14 @@ stage_rollback() {
   rm -f "$F2B/jail.d/pbx-asterisk.local" "$F2B/filter.d/pbx-asterisk-ws.conf"
   command -v fail2ban-client >/dev/null && systemctl restart fail2ban 2>/dev/null || true
   if command -v ufw >/dev/null; then for n in $(ufw status numbered | grep 'pbx-setup' | grep -v 'pbx-setup ssh' | sed -E 's/^\[ *([0-9]+)\].*/\1/' | sort -rn); do ufw --force delete "$n" >/dev/null; done; say "ufw: the WSS and RTP rules added by pbx-setup were removed; the SSH rule is KEPT on purpose (ufw stays enabled with default deny, so removing it would lock you out). Remove it yourself only after checking 'ufw status'"; fi
+  if [ -f /etc/turnserver.conf ] && grep -q "written by pbx-setup" /etc/turnserver.conf; then
+    systemctl disable --now coturn >/dev/null 2>&1 || true
+    mv /etc/turnserver.conf "$removed/turnserver.conf"; [ -f /etc/turnserver.conf.before-pbx-setup ] && mv /etc/turnserver.conf.before-pbx-setup /etc/turnserver.conf
+    rm -rf /etc/coturn/certs; say "coturn stopped and its configuration moved to $removed (the secret stays in $STATE/turn-secret)"
+  fi
+  systemctl disable --now pbx-health.timer >/dev/null 2>&1 || true; rm -f /etc/systemd/system/pbx-health.service /etc/systemd/system/pbx-health.timer
+  for u in asterisk coturn fail2ban; do rm -f "/etc/systemd/system/$u.service.d/pbx-restart.conf"; rmdir "/etc/systemd/system/$u.service.d" 2>/dev/null || true; done
+  systemctl daemon-reload 2>/dev/null || true
   rm -f /etc/cron.d/duckdns /usr/local/sbin/duckdns-update.sh /usr/local/sbin/duckdns-certbot-hook.sh /etc/letsencrypt/renewal-hooks/deploy/pbx-wss.sh
   say "Agent and trunk definitions were moved to $removed (not deleted). Whole-configuration snapshots are in $STATE/snapshots."
   printf 'Also delete the Let'"'"'s Encrypt certificate for %s and /etc/duckdns.env? [y/N] ' "$DOMAIN"; read -r a || a=n
@@ -453,8 +673,13 @@ stage_rollback() {
 }
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift
+stage_all() { # the whole installation without questions (for deploy-remote.sh); every stage verifies itself and stops the run on failure
+  stage_install
+  [ "$CERT_MODE_DEFAULT_DNS" = 1 ] && stage_dns
+  stage_certificate; stage_configure; stage_turn; stage_harden; stage_monitor; stage_firewall --yes; stage_health; stage_status
+}
 case "$cmd" in
   preflight) stage_preflight ;; install) stage_install ;; dns) stage_dns ;; certificate) stage_certificate ;; configure) stage_configure ;;
-  harden) stage_harden ;; firewall) stage_firewall "$@" ;; status) stage_status ;; rollback) stage_rollback ;;
-  *) sed -n '2,24p' "$0"; exit 2 ;;
+  turn) stage_turn ;; health) stage_health "$@" ;; monitor) stage_monitor ;; harden) stage_harden ;; firewall) stage_firewall "$@" ;; status) stage_status ;; rollback) stage_rollback ;; all) load_env; CERT_MODE_DEFAULT_DNS=0; [ "$CERT_MODE" = dns ] && CERT_MODE_DEFAULT_DNS=1; stage_all ;;
+  *) sed -n '2,/^set -eu/p' "$0"; exit 2 ;;
 esac

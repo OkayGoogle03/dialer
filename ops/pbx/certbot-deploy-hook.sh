@@ -39,7 +39,16 @@ install -d -o "$PBX_USER" -g "$PBX_GROUP" -m 0750 "$KEYDIR"
 install -o "$PBX_USER" -g "$PBX_GROUP" -m 0640 "$tmp/pbx.crt" "$KEYDIR/pbx.crt"
 install -o "$PBX_USER" -g "$PBX_GROUP" -m 0600 "$tmp/pbx.key" "$KEYDIR/pbx.key"
 
+# coturn (TURN relay), when installed by the 'turn' stage, reads its own copy of the certificate: refresh it too
+COTURN_CERTS="/etc/coturn/certs"
+if [ -d "$COTURN_CERTS" ]; then
+  install -o turnserver -g turnserver -m 0640 "$tmp/pbx.crt" "$COTURN_CERTS/pbx.crt"
+  install -o turnserver -g turnserver -m 0600 "$tmp/pbx.key" "$COTURN_CERTS/pbx.key"
+fi
+
 if [ "${PBX_HOOK_NO_RELOAD:-0}" = 1 ]; then echo "pbx-wss: certificate for $DOMAIN installed (reload skipped)"; exit 0; fi
+
+[ -d "$COTURN_CERTS" ] && { systemctl restart coturn 2>/dev/null || echo "pbx-wss: warning: coturn did not restart; run: systemctl restart coturn" >&2; }
 
 sh -c "$RELOAD_CMD"
 sleep 3

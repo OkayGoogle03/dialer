@@ -135,7 +135,7 @@ Then reload: `asterisk -rx "core reload"` (use `module reload res_pjsip.so` on a
 1. **Call Servers → Edit**: *SIP server address* = `pbx.example.com` (the certificate's name, never the IP), *Transport* = **Direct browser-to-PBX: WSS**, *Port* = `8089`, *WebSocket path* = `/ws`, *Realm* = the PBX's SIP domain if it expects one.
 2. **SIP accounts**: one per agent, SIP ID = the extension / username from the PBX, with that agent's password (stored encrypted; sent only to that agent's own signed-in browser after sign-in, never written to logs or shown in lists).
 3. **STUN/TURN for browsers** (environment variables on the Dialer API host; defaults work for most networks):
-   `WEBRTC_STUN_URLS` (default `stun:stun.l.google.com:19302`), `WEBRTC_TURN_URLS`, `WEBRTC_TURN_USERNAME`, `WEBRTC_TURN_CREDENTIAL`. The TURN user/credential are secrets: environment only, the config file refuses them.
+   `WEBRTC_STUN_URLS` (default `stun:stun.l.google.com:19302`), `WEBRTC_TURN_URLS` + `WEBRTC_TURN_SECRET` (short-lived credentials per agent). The TURN user/credential are secrets: environment only, the config file refuses them.
 4. The Softphone page shows the mode, extension, call server, connection state and call state, and (in this mode) a *Microphone and speaker* picker (speaker choice needs Chrome or Edge).
 
 ## 6. TURN (only if some agents cannot hear audio)
