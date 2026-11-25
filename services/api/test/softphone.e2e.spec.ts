@@ -168,6 +168,13 @@ describe('Softphone: call server SIP address, per-agent SIP accounts, prefixed m
     await put(t.http, a, `/softphone-accounts/${acct2.id}`, { status: 'disabled' });
     expect((await cfg(ag2).expect(200)).body.accounts).toHaveLength(0);
     await t.http.post('/api/v1/softphone/calls').set(bearer(ag2)).send({ accountId: acct2.id, destination: '2000' }).expect(404);
+    // deactivated: shown as unregistered, gone from the softphone's quick check; activating brings the same account back
+    const adminRow = async () => (await t.http.get('/api/v1/softphone-accounts').set(bearer(a)).expect(200)).body.items.find((x: { id: string }) => x.id === acct2.id);
+    expect(await adminRow()).toMatchObject({ status: 'disabled', registrationStatus: 'unregistered', lastError: null });
+    expect((await t.http.get('/api/v1/softphone/active').set(bearer(ag2)).expect(200)).body.accountIds).toEqual([]);
+    await put(t.http, a, `/softphone-accounts/${acct2.id}`, { status: 'active' });
+    expect((await t.http.get('/api/v1/softphone/active').set(bearer(ag2)).expect(200)).body.accountIds).toEqual([acct2.id]);
+    await put(t.http, a, `/softphone-accounts/${acct2.id}`, { status: 'disabled' });
     await put(t.http, a, `/call-servers/${server.id}`, { status: 'disabled' });
     expect((await cfg(ag1).expect(200)).body.accounts).toHaveLength(0);
     await put(t.http, a, `/call-servers/${server.id}`, { status: 'active' });

@@ -70,10 +70,10 @@ export function CallServersPage() {
           { key: 'n', header: 'Server', render: (s) => <><strong>{s.name}</strong><div className="hint">{s.webrtcUrl ?? (s.host ? `${s.sipTransport}://${s.host}${s.port ? `:${s.port}` : ''}` : 'SIP address not set')}</div></> },
           { key: 'm', header: 'Connection mode', render: (s) => <Badge tone={s.connectionMode === 'direct' ? 'ok' : undefined}>{MODE_LABEL[s.connectionMode ?? 'bridge']}</Badge> },
           { key: 'u', header: 'Address updated', render: (s) => (s.addressUpdatedAt ? new Date(s.addressUpdatedAt).toLocaleString() : '—') },
-          { key: 's', header: 'Status', render: (s) => <Badge tone={statusTone(s.status)}>{s.status.replace('_', ' ')}</Badge> },
+          { key: 's', header: 'Status', render: (s) => <Badge tone={statusTone(s.status)}>{s.status === 'disabled' ? 'deactivated' : s.status.replace('_', ' ')}</Badge> },
           { key: 'a', header: '', render: (s) => manage && (
             <div className="row">
-              {s.status === 'active' ? <Button size="small" variant="secondary" onClick={() => act(() => api.put(`/call-servers/${s.id}`, { status: 'disabled' }))}>Disable</Button>
+              {s.status === 'active' ? <Button size="small" variant="secondary" onClick={() => window.confirm(`Deactivate call server "${s.name}"? All agents on it stop registering and cannot call until you activate it again.`) && act(() => api.put(`/call-servers/${s.id}`, { status: 'disabled' }))}>Deactivate</Button>
                 : <Button size="small" variant="secondary" onClick={() => act(() => api.put(`/call-servers/${s.id}`, { status: 'active' }))}>Activate</Button>}
               <Button size="small" variant="secondary" onClick={() => setForm(s)}>Edit</Button>
               <Button size="small" variant="danger" onClick={() => window.confirm(`Delete call server "${s.name}"? Its dial prefixes and the agents' SIP accounts on it are deleted too.`) && act(() => api.delete(`/call-servers/${s.id}`))}>Delete</Button>
@@ -114,6 +114,20 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
     setNotice(failed.length ? { ok: false, text: `Removed ${ids.length - failed.length} of ${ids.length}. Not removed - ${failed.join('; ')}` } : { ok: true, text: `Removed ${ids.length} SIP account${ids.length === 1 ? '' : 's'}.` });
   }
 
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  /** Switches one agent's SIP account on or off. Deactivated: the agent's softphone unregisters within seconds and cannot place calls; the account and password are kept. */
+  async function setActive(a: SipAccountView, active: boolean) {
+    if (!active && !window.confirm(`Deactivate SIP account ${a.sipId} (${a.userName})? Their softphone stops registering until you activate it again.`)) return;
+    setBusyId(a.id); setNotice(null);
+    try {
+      await api.put(`/softphone-accounts/${a.id}`, { status: active ? 'active' : 'disabled' });
+      await load();
+      setNotice({ ok: true, text: `SIP account ${a.sipId} ${active ? 'activated' : 'deactivated'}.` });
+    } catch (e) { setNotice({ ok: false, text: errText(e, active ? 'Activate failed' : 'Deactivate failed') }); }
+    finally { setBusyId(null); }
+  }
+
   const fieldsNew = [
     { name: 'userId', label: 'Agent', type: 'select' as const, options: [{ value: '', label: 'Select an agent…' }, ...users.map((u) => ({ value: u.id, label: `${u.displayName} (${u.email})` }))] },
     { name: 'callServerId', label: 'Call server', type: 'select' as const, options: [{ value: '', label: 'Select a call server…' }, ...servers.map((s) => ({ value: s.id, label: s.name }))] },
@@ -125,7 +139,7 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
     { name: 'sipId', label: 'SIP ID (username)', required: true },
     { name: 'password', label: 'New SIP password', type: 'password' as const, hint: 'Leave blank to keep the current password.' },
     { name: 'displayName', label: 'Display name (optional)' },
-    { name: 'status', label: 'Status', type: 'select' as const, options: [{ value: 'active', label: 'Active' }, { value: 'disabled', label: 'Disabled' }] },
+    { name: 'status', label: 'Status', type: 'select' as const, options: [{ value: 'active', label: 'Active' }, { value: 'disabled', label: 'Deactivated' }] },
   ];
 
   return (
@@ -148,9 +162,10 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
           { key: 'u', header: 'Agent', render: (a) => <>{a.userName}<div className="hint">{a.userEmail}</div></> },
           { key: 'i', header: 'SIP ID @ server', render: (a) => <>{a.sipId}<div className="hint">{a.callServerName}</div></> },
           { key: 'r', header: 'Registration', render: (a) => <><Badge tone={a.registrationStatus === 'registered' ? 'ok' : a.registrationStatus === 'failed' ? 'off' : undefined}>{a.registrationStatus}</Badge>{a.lastError && <div className="hint">{a.lastError}</div>}{a.lastSeenAt && <div className="hint">seen {new Date(a.lastSeenAt).toLocaleString()}</div>}</> },
-          { key: 's', header: 'Status', render: (a) => <Badge tone={statusTone(a.status)}>{a.status}</Badge> },
+          { key: 's', header: 'Status', render: (a) => <Badge tone={statusTone(a.status)}>{a.status === 'disabled' ? 'deactivated' : a.status}</Badge> },
           { key: 'a', header: '', render: (a) => (
             <div className="row">
+              <Button size="small" variant="secondary" disabled={busyId === a.id} onClick={() => void setActive(a, a.status !== 'active')}>{a.status === 'active' ? 'Deactivate' : 'Activate'}</Button>
               <Button size="small" variant="secondary" onClick={() => setForm(a)}>Edit</Button>
               <Button size="small" variant="danger" onClick={() => window.confirm(`Remove SIP account ${a.sipId}?`) && api.delete(`/softphone-accounts/${a.id}`).then(load).catch((e) => setError(errText(e, 'Delete failed')))}>Remove</Button>
             </div>

@@ -98,7 +98,9 @@ export class SoftphoneService {
       if (dto.displayName !== undefined) { sets.push('display_name = :dn'); p.dn = dto.displayName; }
       if (dto.status !== undefined) { sets.push('status = :st'); p.st = dto.status; }
       if (dto.password) { sets.push('sip_secret_encrypted = :secret'); p.secret = this.secrets.encrypt(dto.password); }
-      if (dto.sipId !== undefined || dto.password) sets.push(`registration_status = 'unknown'`, 'last_error = NULL');
+      // A deactivated account is no longer handed to the softphone, which unregisters on its next check: show it as unregistered right away.
+      if (dto.status === 'disabled') sets.push(`registration_status = 'unregistered'`, 'last_error = NULL');
+      else if (dto.sipId !== undefined || dto.password) sets.push(`registration_status = 'unknown'`, 'last_error = NULL');
       if (sets.length) await tx.execute(`UPDATE softphone_accounts SET ${sets.join(', ')} WHERE tenant_id = :tenantId AND id = :id`, p);
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'softphone_account.updated', entityType: 'softphone_account', entityId: id,
         metadata: { fields: Object.keys(dto).map((k) => (k === 'password' ? 'password(changed)' : k)) } }, ctx);
