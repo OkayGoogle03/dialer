@@ -1,6 +1,6 @@
 {
   "name": "@dialer/desktop",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "private": true,
   "description": "Project Dialer - Windows desktop softphone",
   "author": "Project Dialer",
@@ -9,18 +9,37 @@
     "start": "electron .",
     "dist": "electron-builder --win nsis --x64",
     "pack": "electron-builder --win dir --x64",
-    "test": "node --test sip/sip-ua.test.js"
+    "test": "node --test sip/sip-ua.test.js sip/bridge.test.js"
   },
   "build": {
     "appId": "com.projectdialer.desktop",
     "productName": "Project Dialer",
-    "files": ["main.js", "preload.js", "settings.html", "sip/sip-ua.js", "package.json"],
-    "directories": { "output": "release" },
-    "win": { "target": "nsis" },
-    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true }
+    "files": [
+      "main.js",
+      "preload.js",
+      "settings.html",
+      "sip/sip-ua.js",
+      "sip/sip-host.js",
+      "sip/bridge.js",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "devDependencies": {
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "ws": "8.18.0"
   }
 }

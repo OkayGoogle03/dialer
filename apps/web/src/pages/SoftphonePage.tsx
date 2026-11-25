@@ -75,7 +75,7 @@ export function SoftphonePage() {
       <div className="sp-grid">
         <Card title="Phone">
           <div className="conn-info" aria-label="Connection">
-            <div><span className="hint">Mode</span><b>{direct ? 'Direct browser-to-PBX (WSS + WebRTC)' : 'Windows desktop app (UDP/TCP SIP)'}</b></div>
+            <div><span className="hint">Mode</span><b>{direct ? 'Direct browser-to-PBX (WSS + WebRTC)' : 'Windows app on this PC (UDP/TCP SIP)'}</b></div>
             <div><span className="hint">Extension</span><b>{sp.account?.sipId ?? '—'}</b></div>
             <div><span className="hint">Call server</span><b>{sp.account?.callServer.name ?? '—'}</b></div>
             <div><span className="hint">Connection</span><b>{REG_LABEL[sp.reg]}</b></div>

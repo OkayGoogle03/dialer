@@ -23,7 +23,7 @@ const ACTIVE_CHECK_MS = 10_000;
 const RETRY_MS = 30_000;
 
 /** Identity of everything that needs a new SIP UA when it changes (address, credentials). */
-export const uaKey = (a: SoftphoneAccount | undefined) => (a ? [a.id, a.sipId, a.password, a.callServer.webrtcUrl, a.callServer.realm].join('|') : '');
+export const uaKey = (a: SoftphoneAccount | undefined) => (a ? [a.id, a.sipId, a.password, a.callServer.webrtcUrl, a.callServer.realm, a.callServer.transport, a.callServer.host, a.callServer.port].join('|') : '');
 
 /**
  * Browser (WebRTC) softphone engine on JsSIP. It registers the agent's own SIP account with the call server the admin
@@ -159,19 +159,26 @@ export function useSoftphone() {
   const startUa = useCallback(async (acct: SoftphoneAccount) => {
     stopUa();
     if (isNativeTransport(acct.callServer.transport)) {
-      if (!nativeAvailable()) { setReg('unavailable'); setRegError(`This call server uses ${acct.callServer.transport.toUpperCase()} SIP, which a browser cannot do. Use the Windows desktop app (sidebar: Download App), or ask your administrator to switch this call server to Direct browser-to-PBX (WSS).`); return; }
+      if (!nativeAvailable()) { setReg('unavailable'); setRegError(`This call server uses ${acct.callServer.transport.toUpperCase()} SIP. That works on a Windows PC with the Project Dialer app. On this device, ask your administrator to switch the call server to Direct browser-to-PBX (WSS).`); return; }
       setReg('connecting'); setRegError(null);
       const key = uaKey(acct);
       keyRef.current = key;
+      if (rejected.current.has(key)) { setReg('failed'); setRegError(credentialRejectedMessage(401)); return; }
       try {
         const native = await startNative({ host: acct.callServer.host ?? '', port: acct.callServer.port ?? (acct.callServer.transport === 'tcp' ? 5060 : 5060), transport: acct.callServer.transport, sipId: acct.sipId, password: acct.password, realm: acct.callServer.realm, displayName: acct.displayName }, {
           onRegistered: () => { if (keyRef.current !== key) return; setReg('registered'); setRegError(null); report(acct.id, 'registered'); },
-          onFailed: (m) => { if (keyRef.current !== key) return; setReg('failed'); setRegError(`Registration failed: ${m}`); report(acct.id, 'failed', m); },
+          onFailed: (m) => { if (keyRef.current !== key) return; if (/rejected the SIP ID or password/i.test(m)) rejected.current.add(key); setReg('failed'); setRegError(`Registration failed: ${m}`); report(acct.id, 'failed', m); },
           onDisconnected: () => { if (keyRef.current !== key) return; setReg('failed'); setRegError('Connection to the call server was lost.'); report(acct.id, 'failed', 'connection lost'); },
           onIncoming: (s, from) => { if (session.current) { s.terminate(); return; } wireSession(s, { ...IDLE_CALL, state: 'incoming', direction: 'in', number: from }); },
         });
+        // while connecting (the app may be asking to allow this website) the account may have changed or been deactivated: drop this one
+        if (keyRef.current !== key) { native.stop(); return; }
         ua.current = { call: native.call, stop: native.stop };
-      } catch (e) { setReg('failed'); setRegError(`Could not start the desktop SIP engine: ${e instanceof Error ? e.message : 'error'}`); }
+      } catch (e) {
+        if (keyRef.current !== key) return;
+        const why = e instanceof Error ? e.message : 'error';
+        setReg('failed'); setRegError(why); report(acct.id, 'failed', why);
+      }
       return;
     }
     if (!acct.callServer.webrtcUrl) { setReg('unavailable'); setRegError('This call server is configured with a transport the browser cannot use (needs WSS/WS).'); return; }
