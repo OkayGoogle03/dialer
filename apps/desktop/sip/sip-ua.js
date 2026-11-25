@@ -105,7 +105,11 @@ class SipUa extends EventEmitter {
     this.register();
   }
 
-  send(text) { const b = Buffer.from(text, 'utf8'); if (this.tcp) this.tcp.write(b); else this.sock.send(b); this.emit('tx', text.split(CRLF)[0]); }
+  send(text) {
+    const b = Buffer.from(text, 'utf8');
+    if (this.tcp) { if (!this.tcp.destroyed) this.tcp.write(b); } else if (this.sock) this.sock.send(b); else return; // already closed
+    this.emit('tx', text.split(CRLF)[0]);
+  }
   onStream(d) {
     this.rxBuf += d.toString('utf8');
     for (;;) {
@@ -122,7 +126,7 @@ class SipUa extends EventEmitter {
 
   // ------------------------------------------------------------ registration
   register(auth) {
-    if (this.stopped) return;
+    if (this.stopped && !this.unregistering) return;
     this.regCseq++;
     const uri = `sip:${this.realm}`;
     this.regBranch = `z9hG4bK${rnd(6)}`;
@@ -135,10 +139,24 @@ class SipUa extends EventEmitter {
   }
 
   stop() {
-    this.stopped = true; clearTimeout(this.regTimer); clearTimeout(this.reregTimer);
+    if (this.stopped) return;
+    clearTimeout(this.regTimer); clearTimeout(this.reregTimer);
     if (this.call) this.hangup();
-    if (this.registered) { try { this.o.expires = 0; this.stopped = false; this.register(); this.stopped = true; } catch { /* closing */ } }
-    setTimeout(() => { try { this.sock?.close(); } catch { /* closed */ } try { this.tcp?.destroy(); } catch { /* closed */ } }, 150);
+    this.stopped = true;
+    if (!this.registered) { setTimeout(() => this.close(), 150); return; }
+    // Unregister (Expires: 0). The call server challenges this request too, so the socket stays open until it has been answered with the
+    // password and confirmed; otherwise the registration would stay on the call server until it expires.
+    this.registered = false; this.unregistering = true; this.authTried = false; this.o.expires = 0;
+    this.closeTimer = setTimeout(() => this.close(), 2000); // no answer: close anyway
+    try { this.register(); } catch { this.close(); }
+  }
+
+  close() {
+    clearTimeout(this.closeTimer); clearTimeout(this.regTimer);
+    this.unregistering = false;
+    try { this.sock?.close(); } catch { /* closed */ }
+    this.sock = null;
+    try { this.tcp?.destroy(); } catch { /* closed */ }
   }
 
   // ------------------------------------------------------------ incoming messages
@@ -170,7 +188,7 @@ class SipUa extends EventEmitter {
     if (msg.status < 200) return;
     this.authTried = false; clearTimeout(this.regTimer);
     if (msg.status === 200) {
-      if (this.o.expires === 0) return;
+      if (this.o.expires === 0) { setTimeout(() => this.close(), 100); return; } // unregistered: done (the delay lets a hang-up finish)
       this.registered = true;
       const granted = Number(/expires=(\d+)/i.exec(h(msg, 'contact'))?.[1] ?? /^(\d+)/.exec(h(msg, 'expires'))?.[1] ?? this.o.expires);
       clearTimeout(this.reregTimer);

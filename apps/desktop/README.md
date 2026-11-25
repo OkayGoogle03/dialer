@@ -10,5 +10,10 @@ pnpm --filter @dialer/desktop dist    # build release/Project Dialer Setup <vers
 ```
 First run asks for the server address (https://…; http only for localhost). Change it later from the Dialer menu.
 
-Limits: it uses the same SIP-over-WebSocket/WebRTC stack as the browser, so the call server must offer WSS + WebRTC.
-Native UDP/TCP/TLS SIP (PJSIP) is not included. The installer is unsigned (Windows SmartScreen will warn) and has the default icon.
+Call servers set to **wss / ws** use the same SIP-over-WebSocket/WebRTC stack as the browser. Call servers set to **udp / tcp** use the
+built-in SIP engine (`sip/sip-ua.js`, G.711 and DTMF) running on this computer.
+
+Activate / deactivate (Call Servers page, per call server or per SIP account) works inside this app too: the page checks every few seconds,
+and on deactivation the engine ends any call and unregisters.
+
+Limits: no TLS/SRTP and no NAT traversal (STUN/ICE) in the UDP/TCP engine. The installer is unsigned (Windows SmartScreen will warn) and has the default icon.

@@ -30,6 +30,7 @@ function fakePbx(kind, { inviteStatus = 200 } = {}) {
     const first = msg.split(CRLF)[0]; log.push(first);
     if (first.startsWith('REGISTER')) {
       if (!verify(msg, 'REGISTER')) return reply(msg, 401, 'Unauthorized', `WWW-Authenticate: Digest realm="pbx.local", nonce="abc123nonce", algorithm=MD5, qop="auth"${CRLF}`);
+      if (hdr(msg, 'Expires') === '0') log.push('UNREGISTERED'); // only an authenticated Expires: 0 removes the registration
       return reply(msg, 200, 'OK', `Contact: ${hdr(msg, 'Contact')};expires=300${CRLF}`);
     }
     if (first.startsWith('INVITE')) {
@@ -123,6 +124,19 @@ test('a rejected call reports the SIP code; a wrong password fails registration'
     assert.match((await rejected).reason, /rejected/);
   } finally { ua.stop(); bad.stop(); pbx.close(); }
 });
+
+for (const transport of ['udp', 'tcp']) {
+  test(`${transport.toUpperCase()}: stop() (account deactivated) answers the PBX login challenge, so the registration is really removed`, async () => {
+    const pbx = await fakePbx(transport);
+    const ua = new SipUa({ server: '127.0.0.1', port: pbx.port, transport, sipId: '1001', password: PASSWORD, realm: 'pbx.local' });
+    try {
+      const reg = once(ua, 'registered'); await ua.start(); await reg;
+      ua.stop();
+      await new Promise((r) => setTimeout(r, 600));
+      assert.ok(pbx.log.includes('UNREGISTERED'), 'authenticated REGISTER with Expires: 0');
+    } finally { ua.stop(); pbx.close(); }
+  });
+}
 
 test('cancelling before answer sends CANCEL', async () => {
   const pbx = await fakePbx('udp', { inviteStatus: 603 });

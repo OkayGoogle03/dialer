@@ -113,6 +113,10 @@ export async function startNative(acct: NativeAccount, h: NativeHandlers) {
       if (!res.ok) { session = null; setTimeout(() => s.emit('failed', { cause: res.message ?? 'Could not call', message: undefined }), 0); }
       return s;
     },
-    stop() { off(); audio.stop(); void sip.stop(); },
+    stop() {
+      off(); audio.stop(); void sip.stop();
+      // Stopping hangs up a live call, but its events no longer arrive here (e.g. the account was deactivated): end it on screen too.
+      const s = session; session = null; s?.emit('ended', { cause: 'Softphone stopped' });
+    },
   };
 }
