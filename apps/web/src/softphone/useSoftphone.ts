@@ -206,6 +206,7 @@ export function useSoftphone() {
           onRegistered: () => { if (keyRef.current !== key) return; setReg('registered'); setRegError(null); report(acct.id, 'registered'); },
           onFailed: (m) => { if (keyRef.current !== key) return; if (/rejected the SIP ID or password/i.test(m)) rejected.current.add(key); setReg('failed'); setRegError(`Registration failed: ${m}`); report(acct.id, 'failed', m); },
           onDisconnected: () => { if (keyRef.current !== key) return; setReg('failed'); setRegError('Connection to the call server was lost.'); report(acct.id, 'failed', 'connection lost'); },
+          onMissed: (from) => { if (accountRef.current) recordIncoming(api, accountRef.current.id, from).finished('failed', 'Missed: on another call'); },
           onIncoming: (s, from) => { if (session.current) { s.terminate(); if (accountRef.current) recordIncoming(api, accountRef.current.id, from).finished('failed', 'Missed: on another call'); return; } setError(null); wireSession(s, { ...IDLE_CALL, state: 'incoming', direction: 'in', number: from }); },
         });
         // while connecting, the account may have changed or been deactivated: drop this one

@@ -173,7 +173,7 @@ class SipUa extends EventEmitter {
     if (msg.method === 'INVITE') return this.onInvite(msg);
     if (msg.method === 'ACK') return;
     if (msg.method === 'BYE') { this.reply(msg, 200, 'OK'); return this.endCall('remote hangup', 'ended'); }
-    if (msg.method === 'CANCEL') { this.reply(msg, 200, 'OK'); if (this.call?.incoming) { this.reply(this.call.invite, 487, 'Request Terminated'); this.endCall('cancelled by caller', 'ended'); } return; }
+    if (msg.method === 'CANCEL') { this.reply(msg, 200, 'OK'); const c = this.call; if (c?.dir === 'in' && c.state === 'incoming' && h(msg, 'call-id') === c.callId) { this.reply(c.invite, 487, 'Request Terminated'); this.endCall('cancelled by caller', 'ended'); } return; }
     this.reply(msg, 405, 'Method Not Allowed');
   }
 
@@ -295,8 +295,20 @@ class SipUa extends EventEmitter {
 
   // ------------------------------------------------------------ inbound calls
   async onInvite(msg) {
-    if (this.call) return this.reply(msg, 486, 'Busy Here');
-    const rtp = await this.openRtp();
+    const id = h(msg, 'call-id');
+    if (this.call?.dir === 'in' && this.call.callId === id) { // the same call sent again (UDP repeats it until it hears from us)
+      if (this.call.state === 'incoming') this.reply(msg, 180, 'Ringing', [this.contact()]);
+      return;
+    }
+    if (this.call || this.opening) {
+      if (this.opening === id) return;
+      this.reply(msg, 486, 'Busy Here');
+      if (this.missed !== id) { this.missed = id; this.emit('call', { state: 'missed', from: /sip:([^@;>]+)/.exec(h(msg, 'from'))?.[1] ?? 'unknown' }); }
+      return;
+    }
+    this.opening = id; // opening the audio port takes a moment: a repeat arriving meanwhile must not start a second call
+    let rtp;
+    try { rtp = await this.openRtp(); } finally { this.opening = null; }
     this.call = { dir: 'in', invite: msg, callId: h(msg, 'call-id'), cseq: cseqNum(msg), rtp, state: 'incoming', routeSet: (msg.headers['record-route'] ?? []), remoteTarget: uriOf(h(msg, 'contact')) };
     this.call.target = uriOf(h(msg, 'from'));
     if (!this.useRemoteMedia(msg.body)) { this.reply(msg, 488, 'Not Acceptable Here'); return this.endCall('no usable codec', 'failed', 488); }

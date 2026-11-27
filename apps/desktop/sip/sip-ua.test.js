@@ -138,6 +138,46 @@ for (const transport of ['udp', 'tcp']) {
   });
 }
 
+/** A caller behind a UDP PBX: accepts the registration, then sends call messages to the app and records its answers. */
+async function callingPbx() {
+  const s = dgram.createSocket('udp4'); let peer; const got = [];
+  const raw = (t) => s.send(Buffer.from(t), peer.port, peer.address);
+  s.on('message', (m, r) => {
+    peer = r; const msg = m.toString(); const first = msg.split(CRLF)[0]; got.push({ first, id: /^Call-ID: (.*)$/im.exec(msg)?.[1] });
+    if (!first.startsWith('REGISTER')) return;
+    const keep = (k) => new RegExp(`^${k}:.*$`, 'im').exec(msg)[0];
+    raw(['SIP/2.0 200 OK', keep('Via'), keep('From'), keep('To') + ';tag=reg', keep('Call-ID'), keep('CSeq'), 'Content-Length: 0', '', ''].join(CRLF));
+  });
+  await new Promise((r) => s.bind(0, '127.0.0.1', r));
+  const request = (method, id, from, body = '') => raw([`${method} sip:1001@127.0.0.1 SIP/2.0`, `Via: SIP/2.0/UDP 127.0.0.1:${s.address().port};branch=z9hG4bK${id}`, `From: <sip:${from}@pbx.local>;tag=c`, 'To: <sip:1001@pbx.local>', `Call-ID: ${id}`, `CSeq: 1 ${method}`, `Contact: <sip:${from}@127.0.0.1:${s.address().port}>`, ...(body ? ['Content-Type: application/sdp'] : []), `Content-Length: ${Buffer.byteLength(body)}`, '', body].join(CRLF));
+  const sdp = ['v=0', 'o=c 1 1 IN IP4 127.0.0.1', 's=-', 'c=IN IP4 127.0.0.1', 't=0 0', 'm=audio 40000 RTP/AVP 0', ''].join(CRLF);
+  return { port: s.address().port, got, invite: (id, from) => request('INVITE', id, from, sdp), cancel: (id, from) => request('CANCEL', id, from), answers: (id) => got.filter((g) => g.id === id && g.first.startsWith('SIP/2.0')).map((g) => g.first.slice(8)), close: () => s.close() };
+}
+
+test('incoming calls: repeats ring once, a second caller is reported as missed, an early hang-up and a rejection end the call', async () => {
+  const pbx = await callingPbx();
+  const ua = new SipUa({ server: '127.0.0.1', port: pbx.port, transport: 'udp', sipId: '1001', password: PASSWORD, realm: 'pbx.local' });
+  const events = [];
+  ua.on('call', (c) => events.push(`${c.state}${c.from ? ` ${c.from}` : ''}${c.reason ? ` (${c.reason})` : ''}`));
+  const wait = () => new Promise((r) => setTimeout(r, 250));
+  try {
+    const reg = once(ua, 'registered'); await ua.start(); await reg;
+    pbx.invite('first', '4001'); pbx.invite('first', '4001'); await wait(); pbx.invite('first', '4001'); await wait();
+    assert.deepEqual(events, ['incoming 4001']);
+    assert.ok(!pbx.answers('first').some((a) => a.startsWith('486')), 'a repeat must not be answered with busy');
+    pbx.invite('second', '4005'); await wait(); pbx.invite('second', '4005'); await wait();
+    assert.deepEqual(events, ['incoming 4001', 'missed 4005']);
+    pbx.cancel('second', '4005'); await wait();
+    assert.equal(events.length, 2, 'cancelling the other call leaves the ringing one alone');
+    pbx.cancel('first', '4001'); await wait();
+    assert.deepEqual(events.slice(2), ['ended (cancelled by caller)']);
+    assert.ok(pbx.answers('first').some((a) => a.startsWith('487')));
+    pbx.invite('third', '4001'); await wait(); ua.hangup(); await wait();
+    assert.deepEqual(events.slice(3), ['incoming 4001', 'ended (hung up)']);
+    assert.ok(pbx.answers('third').some((a) => a.startsWith('486')));
+  } finally { ua.stop(); await wait(); pbx.close(); }
+});
+
 test('cancelling before answer sends CANCEL', async () => {
   const pbx = await fakePbx('udp', { inviteStatus: 603 });
   const ua = new SipUa({ server: '127.0.0.1', port: pbx.port, transport: 'udp', sipId: '1001', password: PASSWORD, realm: 'pbx.local' });

@@ -82,12 +82,15 @@ export class NativeSession extends Emitter {
 
 export interface NativeHandlers {
   onRegistered(): void; onFailed(msg: string): void; onDisconnected(): void; onIncoming(s: NativeSession, from: string): void;
+  /** a second caller was turned away because a call was already in progress */
+  onMissed?(from: string): void;
 }
 
 /** Starts the native engine for an account. Returns an object with the same call/stop shape the hook uses. */
 export async function startNative(acct: NativeAccount, h: NativeHandlers) {
   const sip = window.desktop!.sip!;
   let session: NativeSession | null = null;
+  let unanswered = false; // an incoming call that has not been answered yet
   const audio = new AudioBridge();
   const off = sip.onEvent((ev, d) => {
     if (ev === 'registered') h.onRegistered();
@@ -96,12 +99,20 @@ export async function startNative(acct: NativeAccount, h: NativeHandlers) {
     else if (ev === 'error') h.onFailed(String(d.message ?? 'network error'));
     else if (ev === 'call') {
       const state = d.state as string;
-      if (state === 'incoming') { session = new NativeSession(sip, audio); h.onIncoming(session, String(d.from ?? 'unknown')); return; }
+      if (state === 'missed') { h.onMissed?.(String(d.from ?? 'unknown')); return; }
+      if (state === 'incoming') { session = new NativeSession(sip, audio); unanswered = true; h.onIncoming(session, String(d.from ?? 'unknown')); return; }
       if (!session) return;
       if (state === 'ringing') session.emit('progress', { response: { status_code: Number(d.code ?? 180) } });
-      else if (state === 'in_call') { session.emit('accepted'); void session.openAudio(); }
+      else if (state === 'in_call') { unanswered = false; session.emit('accepted'); void session.openAudio(); }
       else if (state === 'failed') { session.emit('failed', { cause: String(d.reason ?? 'failed'), message: d.code ? { status_code: d.code } : undefined }); session.closeAudio(); session = null; }
-      else if (state === 'ended') { const s = session; session = null; s.closeAudio(); s.emit('ended', { cause: String(d.reason ?? 'ended') }); }
+      else if (state === 'ended') {
+        const s = session; session = null; s.closeAudio();
+        const reason = String(d.reason ?? 'ended');
+        // reported like the browser engine does: who ended it, and an incoming call that was never answered "fails" (rejected or missed)
+        const originator = /remote|by caller/.test(reason) ? 'remote' : 'local';
+        if (unanswered) { unanswered = false; s.emit('failed', { originator, cause: originator === 'remote' ? 'Canceled' : 'Rejected' }); }
+        else s.emit('ended', { originator, cause: reason });
+      }
     }
   });
   const r = await sip.start({ host: acct.host, port: acct.port, transport: acct.transport, sipId: acct.sipId, password: acct.password, realm: acct.realm, displayName: acct.displayName });
@@ -109,6 +120,7 @@ export async function startNative(acct: NativeAccount, h: NativeHandlers) {
   return {
     async call(target: string) {
       session = new NativeSession(sip, audio);
+      unanswered = false;
       const s = session;
       const res = await sip.call(target);
       if (!res.ok) { session = null; setTimeout(() => s.emit('failed', { cause: res.message ?? 'Could not call', message: undefined }), 0); }

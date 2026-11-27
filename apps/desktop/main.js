@@ -32,7 +32,9 @@ function load() {
 function createWindow() {
   win = new BrowserWindow({
     width: 1200, height: 800, minWidth: 380, minHeight: 600, backgroundColor: '#e9e2d7', title: 'Project Dialer', autoHideMenuBar: false,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true,
+      // an incoming call must ring even if nobody has clicked in the window yet, and keep ringing on time while it is minimised
+      autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: false },
   });
   // Never navigate away from the configured server (or the bundled settings page); everything else opens in the system browser.
   const allowed = (url) => { try { const u = new URL(url); return u.protocol === 'file:' || u.origin === serverOrigin(); } catch { return false; } };
