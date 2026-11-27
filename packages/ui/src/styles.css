@@ -277,3 +277,15 @@ th input[type='checkbox'], td input[type='checkbox'] { vertical-align: middle; }
 .conn-info > div { display: flex; flex-direction: column; min-width: 0; }
 .conn-info b { font-size: 13px; overflow-wrap: anywhere; }
 .audio-dev { margin-bottom: 10px; }
+
+/* ---------- movable call popup (softphone/CallPopup.tsx) */
+.call-pop { position: fixed; top: 88px; right: 16px; z-index: 60; width: min(320px, calc(100vw - 16px)); border-radius: 18px; background: var(--surface-2); color: var(--text); border: 2px solid var(--brand-primary); box-shadow: var(--shadow-raised); overflow: hidden; }
+.call-pop-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; cursor: move; user-select: none; touch-action: none; background: var(--nav); color: #f3e9dd; }
+.call-pop-body { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 14px; overflow-wrap: anywhere; }
+.call-pop-body strong { font-size: 18px; }
+.call-pop-body .error { margin: 0; }
+
+/* ---------- call history details (pages/CallHistoryPage.tsx) */
+.call-details { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 18px; margin: 0; }
+.call-details dt { font-size: 12px; color: var(--text-muted); }
+.call-details dd { margin: 2px 0 0; font-weight: 600; overflow-wrap: anywhere; }

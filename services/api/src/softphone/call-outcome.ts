@@ -68,3 +68,16 @@ export function classifyOutcome(i: OutcomeInput): Outcome {
   if (/cancel/.test(c)) return i.rang ? ok('Phone rang; the call was cancelled before the user answered') : no('Call cancelled before the phone started ringing');
   return no(`Not connected: ${cause || 'unknown reason'}`);
 }
+
+/** The same for a call the agent RECEIVED. */
+export function classifyIncoming(i: { answered: boolean; cause?: string | null; seconds?: number | null }): Outcome {
+  const c = (i.cause ?? '').toLowerCase();
+  if (i.answered) {
+    const dur = i.seconds != null && i.seconds >= 0 ? ` after ${i.seconds}s` : '';
+    return { status: 'success', note: /caller|remote|called party/.test(c) ? `Call received; the caller ended the call${dur}` : `Call received; you ended the call${dur}` };
+  }
+  if (/another call/.test(c)) return { status: 'not_success', note: 'Missed call: you were on another call' };
+  if (/reject/.test(c)) return { status: 'not_success', note: 'You rejected the call' };
+  if (/microphone|media|webrtc/.test(c)) return { status: 'not_success', note: `Not answered: audio problem (${i.cause})` };
+  return { status: 'not_success', note: 'Missed call' };
+}

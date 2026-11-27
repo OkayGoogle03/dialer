@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { Notice, errText } from '../components/kit';
 import type { CallListItem, CallListSummary } from '../api/types';
 import { CallListRows, ResultDonut, exportList, useListItems } from '../components/CallListRows';
-import { useSoftphone } from '../softphone/useSoftphone';
+import { Softphone, useSharedSoftphone } from '../softphone/SoftphoneContext';
 import { BulkBar, useSelection } from '../components/selection';
 
 interface LogCall { processName?: string | null; id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null; outcome?: { status: 'success' | 'not_success'; note: string } | null }
@@ -24,14 +24,25 @@ function Timer({ since }: { since: number | null }) {
 
 /** Browser softphone: registers the agent's own SIP account with the call server, like X-Lite. Calls are dialled manually. */
 export function SoftphonePage() {
-  const sp = useSoftphone();
+  const sp = useSharedSoftphone();
+  // opening this screen re-reads the settings, as before (a live registration is not restarted)
+  const { refresh } = sp;
+  useEffect(() => { void refresh(); }, [refresh]);
   const [number, setNumber] = useState('');
-  const [option, setOption] = useState('');
+  const [option, setOption] = useState('auto'); // 'auto' | 'none' | 'a:<dial option>' | 'p:<saved prefix>'
   const [log, setLog] = useState<LogCall[] | null>(null);
 
   const options = useMemo(() => (sp.config?.dialOptions ?? []).filter((o) => o.callServerId === sp.account?.callServer.id), [sp.config, sp.account]);
-  useEffect(() => { setOption((cur) => (options.some((o) => o.assignmentId === cur) ? cur : options[0]?.assignmentId ?? '')); }, [options]);
-  const chosen = options.find((o) => o.assignmentId === option);
+  const saved = useMemo(() => (sp.config?.dialPrefixes ?? []).filter((p) => p.callServerId === sp.account?.callServer.id), [sp.config, sp.account]);
+  const prefixOptions = useMemo(() => [
+    { value: 'auto', label: 'Automatic (from your Call Lists)' },
+    { value: 'none', label: 'No prefix (dial as typed)' },
+    ...saved.map((p) => ({ value: `p:${p.prefix}`, label: `Prefix ${p.prefix}${p.label ? ` — ${p.label}` : ''}` })),
+    ...options.map((o) => ({ value: `a:${o.assignmentId}`, label: `${o.processName} — prefix ${o.prefix}` })),
+  ], [saved, options]);
+  useEffect(() => { setOption((cur) => (prefixOptions.some((o) => o.value === cur) ? cur : 'auto')); }, [prefixOptions]);
+  const dialOption = options.find((o) => `a:${o.assignmentId}` === option);
+  const fixedPrefix = option.startsWith('p:') ? option.slice(2) : dialOption?.prefix;
 
   const loadLog = useCallback(() => { api.get<{ items: LogCall[] }>('/softphone/calls?limit=15').then((r) => setLog(r.items)).catch(() => setLog([])); }, []);
   useEffect(() => { loadLog(); }, [loadLog]);
@@ -40,11 +51,13 @@ export function SoftphonePage() {
 
   const busy = sp.call.state !== 'idle';
   const typed = number.replace(/[\s().-]/g, '');
-  const preview = typed && chosen && !typed.startsWith('+') && !typed.startsWith('00') ? chosen.prefix + typed.replace(/^0+/, '') : typed.replace(/^\+|^00/, '');
+  const international = typed.startsWith('+') || typed.startsWith('00');
+  // a dial option drops leading zeros (its dial plan); a saved prefix dials the number as typed. In automatic mode the server decides.
+  const preview = !typed ? '' : international ? typed.replace(/^\+|^00/, '') : fixedPrefix ? fixedPrefix + (dialOption ? typed.replace(/^0+/, '') : typed) : option === 'none' ? typed : '';
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (!busy && typed.length >= 3) void sp.dial(number, chosen?.assignmentId);
+    if (!busy && typed.length >= 3) void sp.dial(number, option === 'auto' ? { autoPrefix: true } : dialOption ? { assignmentId: dialOption.assignmentId } : fixedPrefix ? { prefix: fixedPrefix } : {});
   }
   function press(k: string) {
     if (sp.call.state === 'in_call') sp.sendDtmf(k);
@@ -71,7 +84,6 @@ export function SoftphonePage() {
       {sp.regError && <Alert>{sp.regError}</Alert>}
       {sp.error && <Alert>{sp.error}</Alert>}
       {sp.call.note && sp.call.state === 'idle' && <Alert tone={sp.call.noteOk ? 'success' : 'error'}>{sp.call.note}</Alert>}
-      <audio ref={sp.audio} autoPlay />
       <div className="sp-grid">
         <Card title="Phone">
           <div className="conn-info" aria-label="Connection">
@@ -103,15 +115,15 @@ export function SoftphonePage() {
           )}
           {sp.call.state === 'incoming' ? (
             <div className="stack">
-              <Alert tone="success">Incoming call from {sp.call.number}</Alert>
-              <div className="row"><Button onClick={sp.answer}>Answer</Button><Button variant="danger" onClick={sp.hangup}>Reject</Button></div>
+              <Alert tone="success">Incoming call from {sp.call.callerName ? `${sp.call.callerName} (${sp.call.number})` : sp.call.number}</Alert>
+              <div className="row"><Button busy={!!sp.call.answering} disabled={!!sp.call.answering} onClick={sp.answer}>{sp.call.answering ? 'Answering…' : 'Answer'}</Button><Button variant="danger" onClick={sp.hangup}>Reject</Button></div>
             </div>
           ) : (
             <form onSubmit={submit} noValidate style={{ maxWidth: 360 }}>
               <SelectField label="Prefix" value={option} onChange={(e) => setOption(e.target.value)} disabled={busy}
-                options={[{ value: '', label: 'No prefix (dial as typed)' }, ...options.map((o) => ({ value: o.assignmentId, label: `${o.processName} — prefix ${o.prefix}` }))]} />
+                options={prefixOptions} />
               <TextField label="Number" value={busy ? sp.call.number : number} onChange={(e) => setNumber(e.target.value)} disabled={busy} autoComplete="off" inputMode="tel"
-                hint={!busy && preview ? `Will dial: ${preview}` : busy ? 'Dialled number' : 'National number, or +E.164 for international (no prefix added)'} />
+                hint={!busy && preview ? `Will dial: ${preview}` : busy ? 'Dialled number' : typed && option === 'auto' ? 'The prefix is taken from your Call Lists if this number is in one; otherwise it is dialled as typed' : 'National number, or +E.164 for international (no prefix added)'} />
               <div className="dialpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, margin: '12px 0' }}>
                 {PAD.map((k) => <Button key={k} type="button" variant="secondary" onClick={() => press(k)}>{k}</Button>)}
               </div>
@@ -154,7 +166,7 @@ export function SoftphonePage() {
 }
 
 /** The agent's Excel call lists: Call (or Call next / auto-dial) with live row status and Excel export. */
-function MyCallList({ sp }: { sp: ReturnType<typeof useSoftphone> }) {
+function MyCallList({ sp }: { sp: Softphone }) {
   const [lists, setLists] = useState<CallListSummary[]>([]);
   const [listId, setListId] = useState<string | null>(null);
   const [auto, setAuto] = useState(false);

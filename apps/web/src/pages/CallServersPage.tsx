@@ -7,6 +7,7 @@ import type { UserView } from '../api/client';
 import { ConfigForm, errText, Notice, statusTone, useList } from '../components/kit';
 import { BulkBar, selectColumn, useSelection } from '../components/selection';
 import { SipAccountImport } from '../components/SipAccountImport';
+import { DialPrefixes } from '../components/DialPrefixes';
 
 // The transport decides how agents reach this PBX: browsers connect straight to it (SIP over WSS + WebRTC), or the Windows desktop app's SIP engine does it over UDP/TCP/TLS.
 const TRANSPORTS = [
@@ -85,6 +86,7 @@ export function CallServersPage() {
           ) },
         ]} />
       {manage && <SipAccounts servers={items ?? []} />}
+      {manage && <DialPrefixes servers={items ?? []} />}
     </>
   );
 }

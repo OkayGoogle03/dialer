@@ -1,9 +1,10 @@
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Bell, Building2, Download, Headphones, LayoutDashboard, ListChecks, LogOut, Palette, Search, Server, ShieldCheck, Users, UsersRound } from 'lucide-react';
+import { Bell, Building2, Download, Headphones, History, LayoutDashboard, ListChecks, LogOut, Palette, Search, Server, ShieldCheck, Users, UsersRound } from 'lucide-react';
 import { Button } from '@dialer/ui';
 import { useAuth } from '../auth/AuthContext';
+import { SoftphoneProvider } from '../softphone/SoftphoneContext';
 
 // Only implemented screens are listed. Other modules appear as their phases land (see docs/PROJECT_STATUS.md).
 interface NavItem { to: string; label: string; icon: ReactNode; perm?: string; end?: boolean }
@@ -11,6 +12,7 @@ const ICON = 20;
 const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: <LayoutDashboard size={ICON} />, end: true },
   { to: '/softphone', label: 'Softphone', icon: <Headphones size={ICON} />, perm: 'calls:make' },
+  { to: '/call-history', label: 'Call History', icon: <History size={ICON} />, perm: 'calls:make' },
   { to: '/call-lists', label: 'Call Lists', icon: <ListChecks size={ICON} />, perm: 'caller_import:manage' },
   { to: '/call-servers', label: 'Call Servers', icon: <Server size={ICON} />, perm: 'master_data:read' },
   { to: '/users', label: 'Users', icon: <Users size={ICON} />, perm: 'users:read' },
@@ -70,7 +72,7 @@ export function Shell() {
   const name = me?.user.displayName ?? '';
   const product = platform ? 'Platform Console' : me?.branding?.productName ?? 'Project Dialer';
   useEffect(() => setMenu(null), [loc.pathname]);
-  return (
+  const layout = (
     <div className="shell">
       <header className="topnav">
         <div className="avatar" aria-hidden>{(name || product).trim().charAt(0).toUpperCase()}</div>
@@ -104,4 +106,6 @@ export function Shell() {
       </nav>
     </div>
   );
+  // people who make calls have one softphone running behind every screen
+  return !platform && can('calls:make') ? <SoftphoneProvider>{layout}</SoftphoneProvider> : layout;
 }

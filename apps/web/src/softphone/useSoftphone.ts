@@ -4,18 +4,23 @@ import { errText } from '../components/kit';
 import { isNativeTransport, nativeAvailable, startNative } from './nativeEngine';
 import { createRejectionTracker, credentialRejectedMessage, isCredentialRejection } from './registrationRetry';
 import { createRingPlayer, ringLimitMs, ringSoundFor } from './ringing';
+import { createIceHurry } from './iceHurry';
+import { recordIncoming } from './incomingLog';
 
 export interface SoftphoneAccount {
   id: string; sipId: string; displayName: string | null; password: string;
   callServer: { id: string; name: string; host: string | null; port: number | null; transport: string; connectionMode?: 'direct' | 'bridge'; wsPath: string; realm: string | null; webrtcUrl: string | null; addressUpdatedAt: string | null; ringLimitSeconds?: number | null };
 }
 export interface DialOption { assignmentId: string; processId: string; processName: string; prefix: string; callServerId: string }
+export interface SavedDialPrefix { callServerId: string; prefix: string; label: string | null }
+/** How the prefix of a typed number is chosen. */
+export type PrefixChoice = { autoPrefix: true } | { prefix: string } | { assignmentId: string } | Record<string, never>;
 export interface IceServer { urls: string | string[]; username?: string; credential?: string }
-export interface SoftphoneConfig { accounts: SoftphoneAccount[]; dialOptions: DialOption[]; fetchedAt: string; ringTimeoutSeconds?: number; iceServers?: IceServer[] }
+export interface SoftphoneConfig { accounts: SoftphoneAccount[]; dialOptions: DialOption[]; dialPrefixes?: SavedDialPrefix[]; fetchedAt: string; ringTimeoutSeconds?: number; iceServers?: IceServer[] }
 
 export type RegState = 'idle' | 'connecting' | 'registered' | 'failed' | 'unavailable';
 export type CallState = 'idle' | 'dialing' | 'ringing' | 'in_call' | 'incoming';
-export interface ActiveCall { state: CallState; number: string; direction: 'out' | 'in'; startedAt: number | null; muted: boolean; callId: string | null; note: string | null; /** the call server itself is sending ringing audio (183 with media), so no local ringback is played */ earlyMedia?: boolean; /** the note reports a normal / successful end (shown as a success message, not an error) */ noteOk?: boolean }
+export interface ActiveCall { state: CallState; number: string; direction: 'out' | 'in'; startedAt: number | null; muted: boolean; callerName?: string; /** Answer was pressed and the call is being connected */ answering?: boolean; callId: string | null; note: string | null; /** the call server itself is sending ringing audio (183 with media), so no local ringback is played */ earlyMedia?: boolean; /** the note reports a normal / successful end (shown as a success message, not an error) */ noteOk?: boolean }
 
 const IDLE_CALL: ActiveCall = { state: 'idle', number: '', direction: 'out', startedAt: null, muted: false, callId: null, note: null };
 /** Agents pick up an admin's IP change within this time even if the connection never drops. */
@@ -126,6 +131,22 @@ export function useSoftphone() {
   const wireSession = useCallback((s: any, base: ActiveCall) => {
     session.current = s;
     setCall(base);
+    // do not wait for the browser to try every network route before sending the offer / answer (iceHurry.ts)
+    s.on('icecandidate', createIceHurry());
+    s.on('getusermediafailed', (e: any) => setError(`The microphone could not be opened (${e?.name ?? e?.message ?? 'unknown reason'}). Check it under "Microphone and speaker" on the Softphone, and allow the microphone for this site.`));
+    // received calls are recorded for the call history
+    const log = base.direction === 'in' && accountRef.current ? recordIncoming(api, accountRef.current.id, base.number, base.callerName) : null;
+    let rejectedHere = false;
+    if (log) {
+      s.on('accepted', () => log.answered());
+      s.on('failed', (e: any) => { rejectedHere = e?.originator === 'local'; log.finished('failed', rejectedHere ? 'Rejected by agent' : `Caller cancelled (${e?.cause ?? 'cancelled'})`.slice(0, 100)); });
+      s.on('ended', (e: any) => log.finished('completed', e?.originator === 'remote' ? 'Caller hung up' : 'Agent ended the call'));
+    }
+    // caller details: the name of the user who has this extension on the same call server
+    if (base.direction === 'in' && accountRef.current) {
+      api.get<{ name: string | null }>(`/softphone/caller?accountId=${accountRef.current.id}&number=${encodeURIComponent(base.number)}`)
+        .then((r) => { if (r.name && session.current === s) setCall((c) => ({ ...c, callerName: r.name! })); }).catch(() => undefined);
+    }
     // Auto cut (set per call server): an unanswered outgoing call is cancelled after this time. null = off, it rings until the other side or the call server ends it.
     const ringMs = ringLimitMs(accountRef.current?.callServer.ringLimitSeconds, configRef.current?.ringTimeoutSeconds);
     let ringTimer: ReturnType<typeof setTimeout> | null = null;
@@ -144,7 +165,8 @@ export function useSoftphone() {
     });
     s.on('accepted', () => {
       clearRing();
-      setCall((c) => ({ ...c, state: 'in_call', startedAt: Date.now() }));
+      setError(null);
+      setCall((c) => ({ ...c, state: 'in_call', answering: false, startedAt: Date.now() }));
       track(base.callId, 'answered');
     });
     s.on('peerconnection', (e: any) => attachRemoteAudio(e.peerconnection)); // incoming calls: the connection is created at answer(), after this runs
@@ -184,7 +206,7 @@ export function useSoftphone() {
           onRegistered: () => { if (keyRef.current !== key) return; setReg('registered'); setRegError(null); report(acct.id, 'registered'); },
           onFailed: (m) => { if (keyRef.current !== key) return; if (/rejected the SIP ID or password/i.test(m)) rejected.current.add(key); setReg('failed'); setRegError(`Registration failed: ${m}`); report(acct.id, 'failed', m); },
           onDisconnected: () => { if (keyRef.current !== key) return; setReg('failed'); setRegError('Connection to the call server was lost.'); report(acct.id, 'failed', 'connection lost'); },
-          onIncoming: (s, from) => { if (session.current) { s.terminate(); return; } wireSession(s, { ...IDLE_CALL, state: 'incoming', direction: 'in', number: from }); },
+          onIncoming: (s, from) => { if (session.current) { s.terminate(); if (accountRef.current) recordIncoming(api, accountRef.current.id, from).finished('failed', 'Missed: on another call'); return; } setError(null); wireSession(s, { ...IDLE_CALL, state: 'incoming', direction: 'in', number: from }); },
         });
         // while connecting, the account may have changed or been deactivated: drop this one
         if (keyRef.current !== key) { native.stop(); return; }
@@ -226,9 +248,14 @@ export function useSoftphone() {
     u.on('newRTCSession', (e: any) => {
       if (!cur()) return;
       if (e.originator !== 'remote') return; // outgoing sessions are wired in dial()
-      if (session.current) { e.session.terminate({ status_code: 486, reason_phrase: 'Busy Here' }); return; }
+      if (session.current) {
+        e.session.terminate({ status_code: 486, reason_phrase: 'Busy Here' });
+        if (accountRef.current) recordIncoming(api, accountRef.current.id, e.request?.from?.uri?.user ?? 'unknown', e.session.remote_identity?.display_name || undefined).finished('failed', 'Missed: on another call');
+        return;
+      }
       const from = e.request?.from?.uri?.user ?? 'unknown';
-      wireSession(e.session, { ...IDLE_CALL, state: 'incoming', direction: 'in', number: from });
+      setError(null);
+      wireSession(e.session, { ...IDLE_CALL, state: 'incoming', direction: 'in', number: from, callerName: e.session.remote_identity?.display_name || undefined });
     });
     ua.current = u;
     keyRef.current = uaKey(acct);
@@ -295,12 +322,12 @@ export function useSoftphone() {
     wireSession(s, { ...IDLE_CALL, state: 'dialing', number: placed.dialed, callId: placed.callId, note: placed.prefix ? `Prefix ${placed.prefix} applied` : null });
   }, [wireSession, attachRemoteAudio]);
 
-  const dial = useCallback(async (destination: string, assignmentId?: string) => {
+  const dial = useCallback(async (destination: string, choice: PrefixChoice = {}) => {
     const acct = accountRef.current;
     if (!acct || !ua.current || reg !== 'registered') { setError('Not registered with the call server yet.'); return; }
     setError(null);
     try {
-      const placed = await api.post<{ callId: string; dialed: string; prefix: string; target: string }>('/softphone/calls', { accountId: acct.id, destination, ...(assignmentId ? { assignmentId } : {}) });
+      const placed = await api.post<{ callId: string; dialed: string; prefix: string; target: string }>('/softphone/calls', { accountId: acct.id, destination, ...choice });
       await startCall(placed);
     } catch (e) { setError(errText(e, 'Could not place the call')); }
   }, [reg, startCall]);
@@ -336,8 +363,18 @@ export function useSoftphone() {
   }, [refresh, startCall]);
 
   const hangup = useCallback(() => { try { session.current?.terminate(); } catch { /* already ended */ } }, []);
+  const answered = useRef(new WeakSet<object>()); // answering twice is an error in the SIP library
   const answer = useCallback(() => {
-    try { session.current?.answer({ mediaConstraints: mediaConstraints(), pcConfig: rtcConfig() }); } catch (e) { setError(errText(e, 'Could not answer')); }
+    const s = session.current;
+    if (!s || answered.current.has(s)) return;
+    answered.current.add(s);
+    setError(null);
+    setCall((c) => ({ ...c, answering: true }));
+    try { s.answer({ mediaConstraints: mediaConstraints(), pcConfig: rtcConfig() }); } catch (e) {
+      answered.current.delete(s);
+      setCall((c) => ({ ...c, answering: false }));
+      setError(`Could not answer: ${e instanceof Error ? e.message : 'unknown reason'}`);
+    }
   }, []);
   const mute = useCallback(() => {
     const s = session.current; if (!s) return;

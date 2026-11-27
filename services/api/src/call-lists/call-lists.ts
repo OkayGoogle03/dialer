@@ -15,6 +15,7 @@ import { cellText, ImportFileError, MAX_FILE_BYTES, XLSX_MIME } from '../caller-
 import { Database, newId, Row, SqlRunner } from '../database/database';
 import { HOST_RE, iso, uuidSchema, z, ZodPipe } from '../master-data/common';
 import { DEFAULT_DIAL_PLAN } from '../master-data/processes';
+import { changePrefixes, mergePrefixes } from '../softphone/dial-prefixes';
 import { SoftphoneService } from '../softphone/softphone';
 
 export const LIST_HEADERS = ['Call Server IP', 'SIP ID', 'SIP ID Password', 'Prefix', 'Phone Number'] as const;
@@ -139,6 +140,17 @@ export class CallListsService {
           accounts.set(key, r.sipId);
         } else if (bound !== r.sipId) r.error = `This agent already uses SIP ID ${bound} on this call server`;
       }
+      // the prefixes of the imported rows are saved on their call server, so they show up in the prefix list
+      let savedPrefixes = 0;
+      for (const [key, srv] of servers) {
+        const found = rows.filter((r) => !r.error && r.prefix && r.host.toLowerCase() === key);
+        if (!srv || !found.length) continue;
+        await changePrefixes(tx, srv.id, (saved) => {
+          const next = mergePrefixes(saved, found.map((r) => ({ prefix: r.prefix, label: r.processName || null, source: 'call_list' as const })));
+          savedPrefixes += next.length - saved.length;
+          return next;
+        });
+      }
       const listId = newId();
       const invalid = rows.filter((r) => r.error).length;
       await tx.execute(`INSERT INTO call_lists (id, tenant_id, name, file_name, user_id, total_rows, invalid_rows, created_by) VALUES (:id, :tenantId, :n, :f, :u, :t, :i, :by)`,
@@ -153,9 +165,9 @@ export class CallListsService {
         });
         await tx.execute(`INSERT INTO call_list_items (id, tenant_id, list_id, row_no, call_server_id, server_host, sip_id, prefix, phone, process_name, service_provider, status, result) VALUES ${values.join(', ')}`, p);
       }
-      await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_list.imported', entityType: 'call_list', entityId: listId, metadata: { rows: rows.length, invalid, createdServers, agent: target } }, ctx);
+      await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_list.imported', entityType: 'call_list', entityId: listId, metadata: { rows: rows.length, invalid, createdServers, savedPrefixes, agent: target } }, ctx);
       return {
-        id: listId, total: rows.length, valid: rows.length - invalid, invalid, createdServers,
+        id: listId, total: rows.length, valid: rows.length - invalid, invalid, createdServers, savedPrefixes,
         errors: rows.filter((r) => r.error).slice(0, 100).map((r) => ({ row: r.row, message: r.error })),
       };
     });

@@ -18,7 +18,8 @@ import { iso, uuidSchema, z, ZodPipe } from '../master-data/common';
 import { webrtcUrl, connectionMode } from '../master-data/call-servers';
 import { DEFAULT_DIAL_PLAN } from '../master-data/processes';
 import { normalizeDestination } from '../routing/routing';
-import { classifyOutcome } from './call-outcome';
+import { classifyIncoming, classifyOutcome } from './call-outcome';
+import { changePrefixes, MAX_PREFIXES_PER_SERVER, mergePrefixes, readPrefixes, SAVED_PREFIX_RE } from './dial-prefixes';
 import { turnRestCredential } from './turn';
 
 const sipId = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9._@+-]+$/, 'letters, digits and . _ @ + - only');
@@ -31,10 +32,17 @@ export const accountUpdateSchema = z.object({
   sipId: sipId.optional(), password: sipSecret.optional(), displayName: z.string().trim().max(100).nullable().optional(), status: z.enum(['active', 'disabled']).optional(),
 }).strict();
 const registrationSchema = z.object({ accountId: uuidSchema, state: z.enum(['registered', 'unregistered', 'failed']), error: z.string().trim().max(300).optional() }).strict();
-const callCreateSchema = z.object({ accountId: uuidSchema, destination: z.string().trim().min(3).max(32), assignmentId: uuidSchema.optional() }).strict();
+// which prefix: a dial option (assignmentId), a saved prefix of the call server (prefix), taken from the agent's call lists (autoPrefix), or none
+const savedPrefix = z.string().regex(SAVED_PREFIX_RE, '1-6 digits');
+const callCreateSchema = z.object({ accountId: uuidSchema, destination: z.string().trim().min(3).max(32), assignmentId: uuidSchema.optional(), prefix: savedPrefix.optional(), autoPrefix: z.boolean().optional() }).strict();
+export const prefixSchema = z.object({ callServerId: uuidSchema, prefix: savedPrefix, label: z.string().trim().max(100).optional() }).strict();
+export const prefixRemoveSchema = z.object({ callServerId: uuidSchema, prefix: savedPrefix }).strict();
 const callUpdateSchema = z.object({
   status: z.enum(['ringing', 'answered', 'completed', 'failed']), cause: z.string().trim().max(100).optional(), sipCode: z.number().int().min(100).max(699).optional(),
 }).strict();
+const callerSchema = z.object({ accountId: uuidSchema, number: sipId }).strict();
+// a call arriving at the agent's softphone, reported so it appears in the call history
+const incomingSchema = z.object({ accountId: uuidSchema, from: z.string().trim().min(1).max(32).regex(/^[A-Za-z0-9._@+*#-]+$/, 'not a caller number'), callerName: z.string().trim().max(100).optional() }).strict();
 const callListSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25), offset: z.coerce.number().int().min(0).default(0) }).strict();
 const importQuerySchema = z.object({ dryRun: z.enum(['true', 'false']).default('true') }).strict();
 const accountListSchema = z.object({ userId: uuidSchema.optional(), callServerId: uuidSchema.optional() }).strict();
@@ -158,6 +166,39 @@ export class SoftphoneService {
     }
   }
 
+  // ---------------------------------------------------------------- admin: saved dial prefixes
+  listPrefixes(actor: AuthUser) {
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      const servers = await tx.query<{ id: string; name: string; dial_prefixes: unknown }>(`SELECT id, name, dial_prefixes FROM call_servers WHERE tenant_id = :tenantId AND deleted_at IS NULL ORDER BY name`);
+      return { items: servers.flatMap((s) => readPrefixes(s.dial_prefixes).map((p) => ({ callServerId: s.id, callServerName: s.name, ...p }))) };
+    });
+  }
+
+  addPrefix(actor: AuthUser, dto: z.infer<typeof prefixSchema>, ctx: RequestContext) {
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      const next = await changePrefixes(tx, dto.callServerId, (saved) => {
+        if (saved.some((p) => p.prefix === dto.prefix)) throw new ConflictException('This prefix is already saved for this call server');
+        if (saved.length >= MAX_PREFIXES_PER_SERVER) throw new BadRequestException(`A call server can have at most ${MAX_PREFIXES_PER_SERVER} saved prefixes`);
+        return mergePrefixes(saved, [{ prefix: dto.prefix, label: dto.label || null, source: 'manual' }]);
+      });
+      if (!next) throw new NotFoundException('Call server not found');
+      await this.audit.log(tx, { actorUserId: actor.userId, action: 'dial_prefix.added', entityType: 'call_server', entityId: dto.callServerId, metadata: { prefix: dto.prefix } }, ctx);
+      return { ok: true };
+    });
+  }
+
+  removePrefix(actor: AuthUser, dto: z.infer<typeof prefixRemoveSchema>, ctx: RequestContext) {
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      const next = await changePrefixes(tx, dto.callServerId, (saved) => {
+        if (!saved.some((p) => p.prefix === dto.prefix)) throw new NotFoundException('Prefix not found');
+        return saved.filter((p) => p.prefix !== dto.prefix);
+      });
+      if (!next) throw new NotFoundException('Call server not found');
+      await this.audit.log(tx, { actorUserId: actor.userId, action: 'dial_prefix.removed', entityType: 'call_server', entityId: dto.callServerId, metadata: { prefix: dto.prefix } }, ctx);
+      return { ok: true };
+    });
+  }
+
   updateAccount(actor: AuthUser, id: string, dto: z.infer<typeof accountUpdateSchema>, ctx: RequestContext) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const [cur] = await tx.query(`SELECT id, user_id, call_server_id, sip_id FROM softphone_accounts WHERE tenant_id = :tenantId AND id = :id AND deleted_at IS NULL FOR UPDATE`, { id });
@@ -208,7 +249,7 @@ export class SoftphoneService {
   config(actor: AuthUser, ctx: RequestContext) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const rows = await tx.query(
-        `SELECT a.id, a.sip_id, a.display_name, a.sip_secret_encrypted, s.id AS server_id, s.name AS server_name, s.host, s.port, s.sip_transport, s.sip_ws_path, s.sip_realm, s.address_updated_at, s.auto_cut_enabled, s.auto_cut_seconds
+        `SELECT a.id, a.sip_id, a.display_name, a.sip_secret_encrypted, s.id AS server_id, s.name AS server_name, s.host, s.port, s.sip_transport, s.sip_ws_path, s.sip_realm, s.address_updated_at, s.auto_cut_enabled, s.auto_cut_seconds, s.dial_prefixes
            FROM softphone_accounts a JOIN call_servers s ON s.id = a.call_server_id AND s.tenant_id = :tenantId AND s.deleted_at IS NULL AND s.status = 'active'
           WHERE a.tenant_id = :tenantId AND a.user_id = :me AND a.deleted_at IS NULL AND a.status = 'active' ORDER BY s.name`, { me: actor.userId });
       const options = rows.length
@@ -234,6 +275,7 @@ export class SoftphoneService {
           },
         })),
         dialOptions,
+        dialPrefixes: [...new Map(rows.map((r) => [r.server_id as string, r])).values()].flatMap((r) => readPrefixes(r.dial_prefixes).map((p) => ({ callServerId: r.server_id as string, prefix: p.prefix, label: p.label }))),
         fetchedAt: new Date().toISOString(),
         ringTimeoutSeconds: this.appConfig.ringTimeoutSeconds,
         iceServers: this.iceServers(actor.userId),
@@ -251,6 +293,18 @@ export class SoftphoneService {
       out.push({ urls: w.turnUrls, ...turnRestCredential(w.turnSecret, userId, Date.now(), w.turnTtlSeconds) });
     }
     return out;
+  }
+
+  /** Who is calling: the name of the user holding that extension on the same call server as the agent's own account. Only the name is returned. */
+  caller(actor: AuthUser, q: z.infer<typeof callerSchema>) {
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      const [mine] = await tx.query(`SELECT call_server_id FROM softphone_accounts WHERE tenant_id = :tenantId AND id = :id AND user_id = :me AND deleted_at IS NULL`, { id: q.accountId, me: actor.userId });
+      if (!mine) throw new NotFoundException('SIP account not found');
+      const [who] = await tx.query(
+        `SELECT u.display_name FROM softphone_accounts a JOIN users u ON u.id = a.user_id AND u.tenant_id = :tenantId AND u.deleted_at IS NULL
+          WHERE a.tenant_id = :tenantId AND a.call_server_id = :sid AND a.sip_id = :n AND a.deleted_at IS NULL LIMIT 1`, { sid: mine.call_server_id, n: q.number });
+      return { name: (who?.display_name as string | undefined) ?? null };
+    });
   }
 
   reportRegistration(actor: AuthUser, dto: z.infer<typeof registrationSchema>) {
@@ -278,7 +332,7 @@ export class SoftphoneService {
       let prefix = '';
       // Without a dial option (internal extension, test call) the number is dialed as typed, with only basic length checks.
       let plan = { ...DEFAULT_DIAL_PLAN, minLength: 3, stripLeadingZeros: false };
-      let process: { id: string; name: string } | null = null;
+      let process: { id: string | null; name: string } | null = null;
       if (dto.assignmentId) {
         const [ca] = await tx.query(
           `SELECT ca.prefix, p.id AS pid, p.name AS pname, p.dial_plan FROM caller_assignments ca
@@ -286,6 +340,19 @@ export class SoftphoneService {
             WHERE ca.tenant_id = :tenantId AND ca.id = :id AND ca.status = 'active' AND ca.call_server_id = :sid`, { id: dto.assignmentId, sid: acct.server_id });
         if (!ca) throw new BadRequestException('Dial option not found for this call server');
         prefix = ca.prefix; plan = { ...DEFAULT_DIAL_PLAN, ...(ca.dial_plan ?? {}) }; process = { id: ca.pid, name: ca.pname };
+      } else if (dto.prefix) {
+        const [s] = await tx.query(`SELECT dial_prefixes FROM call_servers WHERE tenant_id = :tenantId AND id = :sid`, { sid: acct.server_id });
+        const saved = readPrefixes(s?.dial_prefixes).find((p) => p.prefix === dto.prefix);
+        if (!saved) throw new BadRequestException('This prefix is not saved for this call server');
+        prefix = saved.prefix;
+        if (saved.label) process = { id: null, name: saved.label };
+      } else if (dto.autoPrefix) {
+        // the newest call list row of this agent for this number on this call server decides
+        const [item] = await tx.query(
+          `SELECT i.prefix, i.process_name FROM call_list_items i JOIN call_lists l ON l.id = i.list_id AND l.tenant_id = :tenantId AND l.record_status = 1
+            WHERE i.tenant_id = :tenantId AND i.record_status = 1 AND l.user_id = :me AND i.call_server_id = :sid AND i.phone = :phone AND i.status <> 'invalid'
+            ORDER BY l.created_at DESC, i.row_no LIMIT 1`, { me: actor.userId, sid: acct.server_id, phone: dto.destination.replace(/[\s().-]/g, '') });
+        if (item) { prefix = item.prefix ?? ''; if (item.process_name) process = { id: null, name: item.process_name }; }
       }
       return this.placeInTx(tx, actor, acct, dto.destination, prefix, plan, process, ctx, {});
     });
@@ -309,10 +376,26 @@ export class SoftphoneService {
     }
   }
 
+  /** Records a call that is ringing on the agent's own softphone. Its end is reported with updateCall, like a dialled call. */
+  incomingCall(actor: AuthUser, dto: z.infer<typeof incomingSchema>, ctx: RequestContext) {
+    return this.db.withTenant(actor.tenantId, async (tx) => {
+      const [acct] = await tx.query(`SELECT id, sip_id, call_server_id FROM softphone_accounts WHERE tenant_id = :tenantId AND id = :id AND user_id = :me AND deleted_at IS NULL`, { id: dto.accountId, me: actor.userId });
+      if (!acct) throw new NotFoundException('SIP account not found');
+      const id = newId();
+      await tx.execute(
+        `INSERT INTO call_sessions (id, tenant_id, direction, status, from_number, to_number, user_id, correlation_id, metadata)
+         VALUES (:id, :tenantId, 'inbound', 'ringing', :from, :to, :me, :cid, :meta)`,
+        { id, from: dto.from, to: String(acct.sip_id).slice(0, 32), me: actor.userId, cid: ctx.correlationId ?? null,
+          meta: JSON.stringify({ source: 'softphone', accountId: acct.id, callServerId: acct.call_server_id, callerName: dto.callerName || null }) });
+      await this.outbox.enqueue(tx, actor.tenantId, 'call.created', { call_id: id, direction: 'inbound', from: dto.from, to: acct.sip_id, user_id: actor.userId, campaign_id: null, queue_id: null });
+      return { callId: id };
+    });
+  }
+
   updateCall(actor: AuthUser, id: string, dto: z.infer<typeof callUpdateSchema>) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const [cur] = await tx.query(
-        `SELECT id, status, started_at, answered_at FROM call_sessions WHERE tenant_id = :tenantId AND id = :id AND user_id = :me AND direction = 'outbound'
+        `SELECT id, direction, status, started_at, answered_at, TIMESTAMPDIFF(SECOND, answered_at, UTC_TIMESTAMP(3)) AS answered_for FROM call_sessions WHERE tenant_id = :tenantId AND id = :id AND user_id = :me AND direction IN ('outbound', 'inbound')
             AND JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.source')) = 'softphone' FOR UPDATE`, { id, me: actor.userId });
       if (!cur) throw new NotFoundException('Call not found');
       if (cur.status === dto.status) return { id, status: cur.status }; // idempotent retries from the client
@@ -340,8 +423,10 @@ export class SoftphoneService {
       if (dto.status === 'completed' || dto.status === 'failed') {
         // Same business rule as the Excel call lists: Success when the called phone was reached (answered, rang, busy, declined, hung up), Not success when it never rang.
         const answered = !!cur.answered_at;
-        const seconds = answered ? Math.max(0, Math.round((now.getTime() - new Date(cur.answered_at).getTime()) / 1000)) : 0;
-        outcome = classifyOutcome({ final: dto.status, answered, rang: answered || cur.status === 'ringing', cause: dto.cause, sipCode: dto.sipCode, seconds });
+        // measured by the database clock, which also stamps answered_at (this server's clock may differ from it)
+        const seconds = answered ? Math.max(0, Number(cur.answered_for ?? 0)) : 0;
+        outcome = cur.direction === 'inbound' ? classifyIncoming({ answered, cause: dto.cause, seconds })
+          : classifyOutcome({ final: dto.status, answered, rang: answered || cur.status === 'ringing', cause: dto.cause, sipCode: dto.sipCode, seconds });
         await tx.execute(`UPDATE call_sessions SET metadata = JSON_SET(COALESCE(metadata, JSON_OBJECT()), '$.outcome', JSON_OBJECT('status', :os, 'note', :on)) WHERE tenant_id = :tenantId AND id = :id`,
           { id, os: outcome.status, on: outcome.note.slice(0, 300) });
       }
@@ -432,6 +517,15 @@ export class SoftphoneController {
   @Delete('softphone-accounts/:id') @HttpCode(204) @RequirePermissions('call_servers:manage')
   remove(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @ReqContext() c: RequestContext) { return this.svc.removeAccount(u, id, c); }
 
+  @Get('dial-prefixes') @RequirePermissions('call_servers:manage')
+  prefixes(@CurrentUser() u: AuthUser) { return this.svc.listPrefixes(u); }
+
+  @Post('dial-prefixes') @HttpCode(201) @RequirePermissions('call_servers:manage')
+  addPrefix(@CurrentUser() u: AuthUser, @Body(new ZodPipe(prefixSchema)) dto: z.infer<typeof prefixSchema>, @ReqContext() c: RequestContext) { return this.svc.addPrefix(u, dto, c); }
+
+  @Post('dial-prefixes/delete') @HttpCode(200) @RequirePermissions('call_servers:manage')
+  removePrefix(@CurrentUser() u: AuthUser, @Body(new ZodPipe(prefixRemoveSchema)) dto: z.infer<typeof prefixRemoveSchema>, @ReqContext() c: RequestContext) { return this.svc.removePrefix(u, dto, c); }
+
   // agent (own account only)
   @Get('softphone/config') @Header('Cache-Control', 'no-store') @Throttle({ default: { limit: 30, ttl: 60_000 } }) @RequirePermissions('calls:make')
   config(@CurrentUser() u: AuthUser, @ReqContext() c: RequestContext) { return this.svc.config(u, c); }
@@ -439,11 +533,17 @@ export class SoftphoneController {
   @Get('softphone/active') @Header('Cache-Control', 'no-store') @Throttle({ default: { limit: 60, ttl: 60_000 } }) @RequirePermissions('calls:make')
   active(@CurrentUser() u: AuthUser) { return this.svc.activeAccountIds(u); }
 
+  @Get('softphone/caller') @Throttle({ default: { limit: 60, ttl: 60_000 } }) @RequirePermissions('calls:make')
+  caller(@CurrentUser() u: AuthUser, @Query(new ZodPipe(callerSchema)) q: z.infer<typeof callerSchema>) { return this.svc.caller(u, q); }
+
   @Post('softphone/registration') @HttpCode(200) @Throttle({ default: { limit: 60, ttl: 60_000 } }) @RequirePermissions('calls:make')
   registration(@CurrentUser() u: AuthUser, @Body(new ZodPipe(registrationSchema)) dto: z.infer<typeof registrationSchema>) { return this.svc.reportRegistration(u, dto); }
 
   @Post('softphone/calls') @HttpCode(201) @Throttle({ default: { limit: 60, ttl: 60_000 } }) @RequirePermissions('calls:make')
   place(@CurrentUser() u: AuthUser, @Body(new ZodPipe(callCreateSchema)) dto: z.infer<typeof callCreateSchema>, @ReqContext() c: RequestContext) { return this.svc.placeCall(u, dto, c); }
+
+  @Post('softphone/calls/incoming') @HttpCode(201) @Throttle({ default: { limit: 60, ttl: 60_000 } }) @RequirePermissions('calls:make')
+  incoming(@CurrentUser() u: AuthUser, @Body(new ZodPipe(incomingSchema)) dto: z.infer<typeof incomingSchema>, @ReqContext() c: RequestContext) { return this.svc.incomingCall(u, dto, c); }
 
   @Patch('softphone/calls/:id') @Throttle({ default: { limit: 120, ttl: 60_000 } }) @RequirePermissions('calls:make')
   updateCall(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(callUpdateSchema)) dto: z.infer<typeof callUpdateSchema>) { return this.svc.updateCall(u, id, dto); }

@@ -41,6 +41,7 @@ import { CallerImportService } from './caller-import/caller-import.service';
 import { AppInfoController } from './app-info/app-info.controller';
 import { CallListsController, CallListsService } from './call-lists/call-lists';
 import { SoftphoneController, SoftphoneService } from './softphone/softphone';
+import { CallHistoryController, CallHistoryService } from './softphone/call-history';
 
 export interface AppDeps {
   config: AppConfig;
@@ -93,7 +94,7 @@ export function createAppModule(d: AppDeps): DynamicModule {
       ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }]),
     ],
     controllers: [HealthController, AuthController, UsersController, TenantsController, RolesController, TeamsController, PlatformController,
-      ProvidersController, TrunksController, DidsController, ProcessesController, CallServersController, AssignmentsController, CallerImportController, DialerController, SoftphoneController, AppInfoController, CallListsController],
+      ProvidersController, TrunksController, DidsController, ProcessesController, CallServersController, AssignmentsController, CallerImportController, DialerController, SoftphoneController, CallHistoryController, AppInfoController, CallListsController],
     providers: [
       AuditService,
       OutboxService,
@@ -105,7 +106,7 @@ export function createAppModule(d: AppDeps): DynamicModule {
       PlatformService,
       PlatformAdminGuard,
       SecretsService, ConnectivityService,
-      ProvidersService, TrunksService, DidsService, ProcessesService, CallServersService, AssignmentsService, CallerImportService, DialerService, SoftphoneService, CallListsService,
+      ProvidersService, TrunksService, DidsService, ProcessesService, CallServersService, AssignmentsService, CallerImportService, DialerService, SoftphoneService, CallHistoryService, CallListsService,
       { provide: TelephonyAdapter, useFactory: (c: ConnectivityService) => d.telephony ?? new AriTelephonyAdapter(c), inject: [ConnectivityService] },
       { provide: APP_GUARD, useClass: UserAwareThrottlerGuard },
       { provide: APP_GUARD, useClass: AuthGuard },

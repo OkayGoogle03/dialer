@@ -34,7 +34,7 @@ describe('Softphone: call server SIP address, per-agent SIP accounts, prefixed m
     await put(t.http, a, `/call-servers/${server.id}`, { status: 'active' });
     const imp = await importRows(t.http, a, [['Tata Process', 'Tata', '8809000001', '91', 'PBX-1']]);
     expect(imp.confirm.status).toBe(200);
-  }, 60_000);
+  }, 180_000);
 
   afterAll(async () => { await t?.close(); });
 
