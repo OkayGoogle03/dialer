@@ -1,8 +1,13 @@
 import { Inject } from '@nestjs/common';
 import { APP_CONFIG, AppConfig } from '../config/env';
-import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Header, HttpCode, Injectable, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Header, HttpCode, Injectable, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import type { Response } from 'express';
+import { memoryStorage } from 'multer';
+import { ImportFileError, MAX_FILE_BYTES, XLSX_MIME } from '../caller-import/excel-format';
+import { ACCOUNT_TEMPLATE_FILENAME, AccountRow, buildAccountTemplate, parseAccountWorkbook } from './account-import';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser, RequestContext } from '../common/auth/auth.types';
 import { CurrentUser, ReqContext, RequirePermissions } from '../common/auth/decorators';
@@ -31,6 +36,7 @@ const callUpdateSchema = z.object({
   status: z.enum(['ringing', 'answered', 'completed', 'failed']), cause: z.string().trim().max(100).optional(), sipCode: z.number().int().min(100).max(699).optional(),
 }).strict();
 const callListSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25), offset: z.coerce.number().int().min(0).default(0) }).strict();
+const importQuerySchema = z.object({ dryRun: z.enum(['true', 'false']).default('true') }).strict();
 const accountListSchema = z.object({ userId: uuidSchema.optional(), callServerId: uuidSchema.optional() }).strict();
 
 const ACCOUNT_COLS = `a.id, a.user_id, a.call_server_id, a.sip_id, a.display_name, a.status, a.registration_status, a.registered_at, a.last_seen_at, a.last_error, a.created_at,
@@ -85,6 +91,71 @@ export class SoftphoneService {
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'softphone_account.created', entityType: 'softphone_account', entityId: id, metadata: { userId: dto.userId, callServerId: dto.callServerId, sipId: dto.sipId } }, ctx);
       return this.loadAccount(tx, id);
     });
+  }
+
+  /**
+   * Bulk agent <-> SIP account mapping from an .xlsx. A dry run only reports what each row would do. Otherwise every valid row is created
+   * and the others are reported. Existing links are never changed, and passwords are never part of the answer or the audit log.
+   */
+  async importAccounts(actor: AuthUser, buf: Buffer, dryRun: boolean, ctx: RequestContext) {
+    let rows: AccountRow[];
+    try { rows = await parseAccountWorkbook(buf); } catch (e) { if (e instanceof ImportFileError) throw new BadRequestException({ code: e.code, message: e.message }); throw e; }
+    try {
+      return await this.db.withTenant(actor.tenantId, async (tx) => {
+        // a few set queries instead of several per row: the whole request has to fit the serverless time limit
+        const users = await tx.query<{ id: string; email: string }>(`SELECT id, email FROM users WHERE tenant_id = :tenantId AND deleted_at IS NULL AND status = 'active' AND LOWER(email) IN (:emails)`, { emails: [...new Set(rows.map((r) => r.email))] });
+        const servers = await tx.query<{ id: string; name: string }>(`SELECT id, name FROM call_servers WHERE tenant_id = :tenantId AND deleted_at IS NULL`);
+        const existing = await tx.query<{ user_id: string; call_server_id: string; sip_id: string }>(`SELECT user_id, call_server_id, sip_id FROM softphone_accounts WHERE tenant_id = :tenantId AND deleted_at IS NULL FOR UPDATE`);
+        const userByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
+        const serverByName = new Map(servers.map((x) => [x.name.toLowerCase(), x.id]));
+        const byUser = new Map(existing.map((a) => [`${a.user_id}|${a.call_server_id}`, a.sip_id.toLowerCase()]));
+        const bySip = new Set(existing.map((a) => `${a.call_server_id}|${a.sip_id.toLowerCase()}`));
+        const fileUsers = new Map<string, number>();
+        const fileSips = new Map<string, number>();
+        const create: { id: string; userId: string; serverId: string; r: AccountRow }[] = [];
+        const results = rows.map((r) => {
+          const out = (status: 'create' | 'unchanged' | 'error', message?: string) => ({ row: r.row, agentEmail: r.email, callServer: r.server, sipId: r.sipId, status, message });
+          if (r.error) return out('error', r.error);
+          const userId = userByEmail.get(r.email);
+          if (!userId) return out('error', 'No active user has this email');
+          const serverId = serverByName.get(r.server.toLowerCase());
+          if (!serverId) return out('error', 'No call server has this name');
+          if (!sipId.safeParse(r.sipId).success) return out('error', 'SIP ID is missing or has characters that are not allowed (letters, digits and . _ @ + - only)');
+          if (!sipSecret.safeParse(r.password).success) return out('error', 'SIP password is missing or too long');
+          if (r.displayName.length > 100) return out('error', 'Display name is longer than 100 characters');
+          const userKey = `${userId}|${serverId}`;
+          const sipKey = `${serverId}|${r.sipId.toLowerCase()}`;
+          const mine = byUser.get(userKey);
+          if (mine === r.sipId.toLowerCase()) return out('unchanged', 'Already linked; nothing is changed (the password in the file is ignored)');
+          if (mine !== undefined) return out('error', 'This agent already has a SIP account on that call server; edit or remove it first');
+          if (bySip.has(sipKey)) return out('error', 'This SIP ID is already linked to another agent on that call server');
+          const userRow = fileUsers.get(userKey);
+          if (userRow) return out('error', `Row ${userRow} already links this agent on that call server`);
+          const sipRow = fileSips.get(sipKey);
+          if (sipRow) return out('error', `Row ${sipRow} already uses this SIP ID on that call server`);
+          fileUsers.set(userKey, r.row);
+          fileSips.set(sipKey, r.row);
+          create.push({ id: newId(), userId, serverId, r });
+          return out('create');
+        });
+        if (!dryRun && create.length) {
+          for (let i = 0; i < create.length; i += 100) {
+            const p: Record<string, unknown> = { by: actor.userId };
+            const values = create.slice(i, i + 100).map((c, j) => {
+              Object.assign(p, { [`i${j}`]: c.id, [`u${j}`]: c.userId, [`s${j}`]: c.serverId, [`d${j}`]: c.r.sipId, [`n${j}`]: c.r.displayName || null, [`x${j}`]: this.secrets.encrypt(c.r.password) });
+              return `(:i${j}, :tenantId, :u${j}, :s${j}, :d${j}, :n${j}, :x${j}, :by)`;
+            });
+            await tx.execute(`INSERT INTO softphone_accounts (id, tenant_id, user_id, call_server_id, sip_id, display_name, sip_secret_encrypted, created_by) VALUES ${values.join(', ')}`, p);
+          }
+          await this.audit.log(tx, { actorUserId: actor.userId, action: 'softphone_account.imported', entityType: 'softphone_account', metadata: { created: create.length, accountIds: create.map((c) => c.id) } }, ctx);
+        }
+        const count = (status: string) => results.filter((x) => x.status === status).length;
+        return { dryRun, total: rows.length, toCreate: create.length, created: dryRun ? 0 : create.length, unchanged: count('unchanged'), invalid: count('error'), results };
+      });
+    } catch (e) {
+      if ((e as { code?: string }).code === 'ER_DUP_ENTRY') throw new ConflictException('SIP accounts changed while importing. Nothing was imported: check the file again.');
+      throw e;
+    }
   }
 
   updateAccount(actor: AuthUser, id: string, dto: z.infer<typeof accountUpdateSchema>, ctx: RequestContext) {
@@ -338,6 +409,20 @@ export class SoftphoneController {
 
   @Post('softphone-accounts') @RequirePermissions('call_servers:manage')
   create(@CurrentUser() u: AuthUser, @Body(new ZodPipe(accountCreateSchema)) dto: z.infer<typeof accountCreateSchema>, @ReqContext() c: RequestContext) { return this.svc.createAccount(u, dto, c); }
+
+  @Get('softphone-accounts/import-template') @RequirePermissions('call_servers:manage')
+  async importTemplate(@Res({ passthrough: true }) res: Response) {
+    res.set({ 'Content-Type': XLSX_MIME, 'Content-Disposition': `attachment; filename="${ACCOUNT_TEMPLATE_FILENAME}"`, 'Cache-Control': 'no-store' });
+    return new StreamableFile(await buildAccountTemplate());
+  }
+
+  @Post('softphone-accounts/import') @HttpCode(200) @Throttle({ default: { limit: 20, ttl: 60_000 } }) @RequirePermissions('call_servers:manage')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 5, parts: 8 } }))
+  importAccounts(@CurrentUser() u: AuthUser, @UploadedFile() file: Express.Multer.File | undefined, @Query(new ZodPipe(importQuerySchema)) q: z.infer<typeof importQuerySchema>, @ReqContext() c: RequestContext) {
+    if (!file) throw new BadRequestException('Attach the Excel file in the "file" form field.');
+    return this.svc.importAccounts(u, file.buffer, q.dryRun === 'true', c);
+  }
 
   @Put('softphone-accounts/:id') @RequirePermissions('call_servers:manage')
   update(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body(new ZodPipe(accountUpdateSchema)) dto: z.infer<typeof accountUpdateSchema>, @ReqContext() c: RequestContext) { return this.svc.updateAccount(u, id, dto, c); }

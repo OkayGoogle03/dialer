@@ -6,6 +6,7 @@ import type { CallServerView, Paged, SipAccountView } from '../api/types';
 import type { UserView } from '../api/client';
 import { ConfigForm, errText, Notice, statusTone, useList } from '../components/kit';
 import { BulkBar, selectColumn, useSelection } from '../components/selection';
+import { SipAccountImport } from '../components/SipAccountImport';
 
 // The transport decides how agents reach this PBX: browsers connect straight to it (SIP over WSS + WebRTC), or the Windows desktop app's SIP engine does it over UDP/TCP/TLS.
 const TRANSPORTS = [
@@ -91,6 +92,7 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
   const [users, setUsers] = useState<UserView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<'new' | SipAccountView | null>(null);
+  const [bulk, setBulk] = useState(false);
   const sel = useSelection();
   const [bulkBusy, setBulkBusy] = useState(false);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
@@ -144,7 +146,12 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
 
   return (
     <Card title="SIP accounts (agent softphones)" className="stack">
-      <div className="row"><Button size="small" onClick={() => setForm(form ? null : 'new')} disabled={!servers.length}>{form ? 'Close' : 'Add SIP account'}</Button>{!servers.length && <span className="hint">Add a call server first.</span>}</div>
+      <div className="row">
+        <Button size="small" onClick={() => { setBulk(false); setForm(form ? null : 'new'); }} disabled={!servers.length}>{form ? 'Close' : 'Add SIP account'}</Button>
+        <Button size="small" variant="secondary" onClick={() => { setForm(null); setBulk(!bulk); }} disabled={!servers.length}>{bulk ? 'Close bulk import' : 'Bulk import'}</Button>
+        {!servers.length && <span className="hint">Add a call server first.</span>}
+      </div>
+      {bulk && <SipAccountImport onImported={load} />}
       {error && <Alert>{error}</Alert>}
       {notice && <Alert tone={notice.ok ? 'success' : 'error'}>{notice.text}</Alert>}
       <BulkBar count={sel.selected.size} noun="SIP account" busy={bulkBusy} onDelete={deleteSelected} onClear={sel.clear} />
