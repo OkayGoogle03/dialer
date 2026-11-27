@@ -1,13 +1,10 @@
 'use strict';
-// Windows desktop app for the Project Dialer softphone. Two ways to use it:
-//  1. its own window: the web softphone from YOUR server in a locked-down window;
-//  2. background bridge: the Dialer website in a normal browser on this PC uses this app's SIP engine for UDP/TCP call servers.
-// The server URL is configured on first run and can be changed from the menu.
-const { app, BrowserWindow, Menu, Tray, nativeImage, dialog, shell, session, ipcMain } = require('electron');
+// Windows desktop shell for the Project Dialer softphone. It hosts the web softphone in a locked-down window pointed at YOUR server.
+// WSS call servers use WebRTC inside that window; UDP/TCP call servers use the built-in SIP engine. The server URL is set on first run.
+const { app, BrowserWindow, Menu, shell, session, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { SipHost } = require('./sip/sip-host');
-const { startBridge, BRIDGE_PORT } = require('./sip/bridge');
 
 const cfgFile = () => path.join(app.getPath('userData'), 'config.json');
 const readCfg = () => { try { return JSON.parse(fs.readFileSync(cfgFile(), 'utf8')); } catch { return {}; } };
@@ -24,8 +21,6 @@ function normalizeServer(input) {
 }
 
 let win = null;
-let tray = null;
-let bridge = null;
 const serverOrigin = () => readCfg().server ?? null;
 
 function load() {
@@ -43,7 +38,6 @@ function createWindow() {
   const allowed = (url) => { try { const u = new URL(url); return u.protocol === 'file:' || u.origin === serverOrigin(); } catch { return false; } };
   win.webContents.on('will-navigate', (e, url) => { if (!allowed(url)) { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); } });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  // A closed window frees the SIP engine, so the browser on this PC can use it.
   win.on('closed', () => { win = null; sipHost.stop(windowClient); });
   load();
 }
@@ -54,7 +48,7 @@ function showWindow() {
   win.show(); win.focus();
 }
 
-// ---------------------------------------------------------------- native SIP (UDP/TCP) engine: one per PC, shared by this window and the bridge
+// ---------------------------------------------------------------- native SIP (UDP/TCP) engine, driven by the hosted softphone page
 const sipHost = new SipHost();
 const toWindow = (channel, ...a) => { if (win && !win.isDestroyed()) win.webContents.send(channel, ...a); };
 const windowClient = {
@@ -75,58 +69,13 @@ function registerSip() {
   ipcMain.on('sip:audio-out', (e, buf) => { if (fromTrustedPage(e) && buf) sipHost.sendAudio(windowClient, new Int16Array(buf)); });
 }
 
-// ---------------------------------------------------------------- browser bridge: which websites may use the softphone of this PC
-const asking = new Map(); // origin -> pending question, so a page that retries does not stack up dialogs
-const blocked = new Set(); // refused until the app is restarted
-function isAllowedOrigin(origin) {
-  const cfg = readCfg();
-  if (origin === cfg.server || (cfg.allowedOrigins ?? []).includes(origin)) return Promise.resolve(true);
-  if (blocked.has(origin)) return Promise.resolve(false);
-  if (!asking.has(origin)) {
-    asking.set(origin, (async () => {
-      app.focus({ steal: true });
-      const r = await dialog.showMessageBox({
-        type: 'warning', title: 'Project Dialer', buttons: ['Block', 'Allow'], defaultId: 0, cancelId: 0, noLink: true,
-        message: 'Allow this website to make phone calls from this PC?',
-        detail: `${origin}\n\nChoose Allow only if this is the address of your own Dialer website.`,
-      });
-      asking.delete(origin);
-      if (r.response !== 1) { blocked.add(origin); return false; }
-      const now = readCfg();
-      writeCfg({ ...now, allowedOrigins: [...new Set([...(now.allowedOrigins ?? []), origin])] });
-      return true;
-    })());
-  }
-  return asking.get(origin);
-}
-
-function trayIcon() {
-  const size = 16; const px = Buffer.alloc(size * size * 4); // BGRA: an orange dot
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    if ((x - 7.5) ** 2 + (y - 7.5) ** 2 <= 49) px.set([0x2b, 0x8a, 0xe8, 0xff], (y * size + x) * 4);
-  }
-  return nativeImage.createFromBitmap(px, { width: size, height: size });
-}
-
-function createTray() {
-  tray = new Tray(trayIcon());
-  const startsWithWindows = () => app.getLoginItemSettings({ args: ['--background'] }).openAtLogin;
-  tray.setToolTip(bridge ? 'Project Dialer: ready for calls from your browser' : 'Project Dialer: browser calling is not available');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Project Dialer', click: showWindow },
-    { label: 'Start with Windows', type: 'checkbox', checked: startsWithWindows(), click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked, args: ['--background'] }) },
-    { label: 'Forget allowed websites', click: () => { const c = readCfg(); delete c.allowedOrigins; writeCfg(c); blocked.clear(); } },
-    { type: 'separator' },
-    { label: 'Quit (stops browser calling)', click: () => app.quit() },
-  ]));
-  tray.on('double-click', showWindow);
-}
-
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => { if (app.isReady()) showWindow(); });
-  app.whenReady().then(async () => {
+  app.whenReady().then(() => {
+    // Version 0.3.0 could add a "start with Windows" entry for its removed background mode: take it away.
+    if (app.getLoginItemSettings({ args: ['--background'] }).openAtLogin) app.setLoginItemSettings({ openAtLogin: false, args: ['--background'] });
     // The softphone needs the microphone, only for the configured server.
     session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
       const origin = (() => { try { return new URL(wc.getURL()).origin; } catch { return ''; } })();
@@ -145,18 +94,11 @@ if (!app.requestSingleInstanceLock()) {
       { label: 'Dialer', submenu: [
         { label: 'Server address…', click: () => win?.loadFile(path.join(__dirname, 'settings.html')) },
         { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => win && load() },
-        { type: 'separator' }, { label: 'Quit (stops browser calling)', click: () => app.quit() },
+        { type: 'separator' }, { role: 'quit' },
       ] },
     ]));
-    try {
-      bridge = await startBridge({ host: sipHost, isAllowed: isAllowedOrigin });
-    } catch (e) {
-      dialog.showErrorBox('Project Dialer', `Calling from the web browser is not available: port ${BRIDGE_PORT} on this PC could not be opened (${e.message}). This app's own window still works.`);
-    }
-    createTray();
-    if (!process.argv.includes('--background')) createWindow();
+    createWindow();
   });
 }
 app.on('before-quit', () => { sipHost.shutdown(); });
-// Closing the window keeps the app running in the system tray, so calling from the browser keeps working.
-app.on('window-all-closed', () => { if (!bridge) app.quit(); });
+app.on('window-all-closed', () => app.quit());

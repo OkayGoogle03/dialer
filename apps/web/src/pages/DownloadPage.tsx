@@ -11,7 +11,7 @@ export function DownloadPage() {
   return (
     <>
       <PageHeader title="Desktop App" />
-      <Notice>For UDP or TCP call servers, install this app on the PC you call from and keep it running. You can then call from this website in your browser: the first time, choose Allow when the app asks about this website, and allow local network access if the browser asks. Closing the app's window keeps it running next to the clock; turn on Start with Windows from its icon there. You can also use the softphone inside the app's own window: enter this site's address on first start, then sign in.</Notice>
+      <Notice>For UDP or TCP call servers, call from inside the Windows app's own window; a normal browser cannot use them. On first start enter this site's address; then sign in as usual.</Notice>
       {error && <Alert>{error}</Alert>}
       <Card title="Windows (64-bit)" className="stack">
         {info?.available && info.url ? (

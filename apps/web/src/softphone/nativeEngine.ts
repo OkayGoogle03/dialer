@@ -1,9 +1,7 @@
 /* Adapter: the Windows desktop app's native SIP engine (UDP/TCP, runs on the agent's own PC) presented with the small subset of the
- * JsSIP interface that useSoftphone uses, plus microphone capture / speaker playback (8 kHz mono, G.711 happens in the desktop app).
- * The page is either shown by the app itself, or by a normal browser on the same PC that reaches the engine through the app's local bridge. */
-import { connectBridge } from './bridgeClient';
+ * JsSIP interface that useSoftphone uses, plus microphone capture / speaker playback (8 kHz mono, G.711 happens in the desktop app). */
 
-export interface NativeSip {
+interface NativeSip {
   start(cfg: Record<string, unknown>): Promise<{ ok: boolean; localIp?: string; message?: string }>;
   stop(): Promise<void>;
   call(target: string): Promise<{ ok: boolean; message?: string }>;
@@ -14,8 +12,8 @@ export interface NativeSip {
 }
 declare global { interface Window { desktop?: { sip?: NativeSip } } }
 
-/** UDP/TCP needs the Windows app: its own window, or (through the local bridge) a browser on the same Windows PC. Phones cannot run it. */
-export const nativeAvailable = () => !!window.desktop?.sip || /Windows/i.test(navigator.userAgent);
+/** UDP/TCP works only inside the Windows app's own window; a normal browser cannot do it. */
+export const nativeAvailable = () => !!window.desktop?.sip;
 export const isNativeTransport = (t: string) => t === 'udp' || t === 'tcp';
 
 type Cb = (e?: any) => void;
@@ -36,7 +34,6 @@ class AudioBridge {
   async start(sip: NativeSip) {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
     const ctx = (this.ctx = new AudioContext());
-    void ctx.resume?.(); // a normal browser may create it suspended
     const ratio = ctx.sampleRate / 8000;
     const src = ctx.createMediaStreamSource(this.stream);
     const proc = ctx.createScriptProcessor(2048, 1, 1);
@@ -89,18 +86,13 @@ export interface NativeHandlers {
 
 /** Starts the native engine for an account. Returns an object with the same call/stop shape the hook uses. */
 export async function startNative(acct: NativeAccount, h: NativeHandlers) {
-  // inside the app window the engine is built in; in a normal browser it is reached through the app's bridge on this PC
-  const bridge = window.desktop?.sip ? null : await connectBridge();
-  const sip: NativeSip = window.desktop?.sip ?? bridge!;
+  const sip = window.desktop!.sip!;
   let session: NativeSession | null = null;
   const audio = new AudioBridge();
   const off = sip.onEvent((ev, d) => {
     if (ev === 'registered') h.onRegistered();
     else if (ev === 'registrationFailed') h.onFailed(String(d.reason ?? 'registration failed'));
-    else if (ev === 'disconnected') {
-      if (d.bridge) { const s = session; session = null; s?.closeAudio(); s?.emit('ended', { cause: 'The Project Dialer app on this PC was closed' }); }
-      h.onDisconnected();
-    }
+    else if (ev === 'disconnected') h.onDisconnected();
     else if (ev === 'error') h.onFailed(String(d.message ?? 'network error'));
     else if (ev === 'call') {
       const state = d.state as string;
@@ -113,7 +105,7 @@ export async function startNative(acct: NativeAccount, h: NativeHandlers) {
     }
   });
   const r = await sip.start({ host: acct.host, port: acct.port, transport: acct.transport, sipId: acct.sipId, password: acct.password, realm: acct.realm, displayName: acct.displayName });
-  if (!r.ok) { off(); bridge?.close(); throw new Error(r.message ?? 'Could not start the SIP engine'); }
+  if (!r.ok) { off(); throw new Error(r.message ?? 'Could not start the SIP engine'); }
   return {
     async call(target: string) {
       session = new NativeSession(sip, audio);
@@ -124,7 +116,6 @@ export async function startNative(acct: NativeAccount, h: NativeHandlers) {
     },
     stop() {
       off(); audio.stop(); void sip.stop();
-      bridge?.close(); // sent after the stop request, on the same connection
       // Stopping hangs up a live call, but its events no longer arrive here (e.g. the account was deactivated): end it on screen too.
       const s = session; session = null; s?.emit('ended', { cause: 'Softphone stopped' });
     },

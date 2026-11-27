@@ -1,6 +1,5 @@
 'use strict';
-// Owns the ONE SIP engine of this PC. It is driven either by the app's own window or by the Dialer web page in a browser on the same PC
-// (through the local bridge), never by both at once: two softphones on one SIP account would steal each other's calls.
+// Owns the app's ONE SIP engine and checks every setting the hosted softphone page sends before the engine uses it.
 const { SipUa, isValidTarget } = require('./sip-ua');
 
 const HOST_RE = /^(?=.{1,253}$)(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)$/;

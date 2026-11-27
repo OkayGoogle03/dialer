@@ -1,6 +1,6 @@
 {
   "name": "@dialer/desktop",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Project Dialer - Windows desktop softphone",
   "author": "Project Dialer",
@@ -9,7 +9,7 @@
     "start": "electron .",
     "dist": "electron-builder --win nsis --x64",
     "pack": "electron-builder --win dir --x64",
-    "test": "node --test sip/sip-ua.test.js sip/bridge.test.js"
+    "test": "node --test sip/sip-ua.test.js sip/sip-host.test.js"
   },
   "build": {
     "appId": "com.projectdialer.desktop",
@@ -20,7 +20,6 @@
       "settings.html",
       "sip/sip-ua.js",
       "sip/sip-host.js",
-      "sip/bridge.js",
       "package.json"
     ],
     "directories": {
@@ -38,8 +37,5 @@
   "devDependencies": {
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8"
-  },
-  "dependencies": {
-    "ws": "8.18.0"
   }
 }

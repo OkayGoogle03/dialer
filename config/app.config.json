@@ -9,7 +9,7 @@
     "DB_PORT": "4000",
     "DB_TLS": "true",
     "DESKTOP_DOWNLOAD_URL": "/downloads/Project-Dialer-Setup.exe",
-    "DESKTOP_VERSION": "0.3.0",
+    "DESKTOP_VERSION": "0.4.0",
     "DEFAULT_SIP_TRANSPORT": "udp",
     "RING_TIMEOUT_SECONDS": "5"
   },

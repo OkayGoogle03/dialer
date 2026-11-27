@@ -159,7 +159,7 @@ export function useSoftphone() {
   const startUa = useCallback(async (acct: SoftphoneAccount) => {
     stopUa();
     if (isNativeTransport(acct.callServer.transport)) {
-      if (!nativeAvailable()) { setReg('unavailable'); setRegError(`This call server uses ${acct.callServer.transport.toUpperCase()} SIP. That works on a Windows PC with the Project Dialer app. On this device, ask your administrator to switch the call server to Direct browser-to-PBX (WSS).`); return; }
+      if (!nativeAvailable()) { setReg('unavailable'); setRegError(`This call server uses ${acct.callServer.transport.toUpperCase()} SIP, which a browser cannot do. Use the Windows desktop app (sidebar: Download App), or ask your administrator to switch this call server to Direct browser-to-PBX (WSS).`); return; }
       setReg('connecting'); setRegError(null);
       const key = uaKey(acct);
       keyRef.current = key;
@@ -171,7 +171,7 @@ export function useSoftphone() {
           onDisconnected: () => { if (keyRef.current !== key) return; setReg('failed'); setRegError('Connection to the call server was lost.'); report(acct.id, 'failed', 'connection lost'); },
           onIncoming: (s, from) => { if (session.current) { s.terminate(); return; } wireSession(s, { ...IDLE_CALL, state: 'incoming', direction: 'in', number: from }); },
         });
-        // while connecting (the app may be asking to allow this website) the account may have changed or been deactivated: drop this one
+        // while connecting, the account may have changed or been deactivated: drop this one
         if (keyRef.current !== key) { native.stop(); return; }
         ua.current = { call: native.call, stop: native.stop };
       } catch (e) {
