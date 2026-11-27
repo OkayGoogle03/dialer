@@ -1,5 +1,6 @@
 import { createContext, ReactNode, useContext } from 'react';
 import { CallPopup } from './CallPopup';
+import { AlertPrompt } from './AlertPrompt';
 import { useSoftphone } from './useSoftphone';
 
 export type Softphone = ReturnType<typeof useSoftphone>;
@@ -12,6 +13,7 @@ export function SoftphoneProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={sp}>
       {children}
+      <AlertPrompt sp={sp} />
       <audio ref={sp.audio} autoPlay />
       <CallPopup sp={sp} />
     </Ctx.Provider>

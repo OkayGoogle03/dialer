@@ -347,3 +347,8 @@ th input[type='checkbox'], td input[type='checkbox'] { vertical-align: middle; }
 
 /* tabs at the top of a page */
 .page-tabs { align-self: flex-start; width: fit-content; margin-bottom: var(--space-3); }
+
+/* ---------- phones: ask to turn call alerts on (softphone/AlertPrompt.tsx) */
+.alert-prompt { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 55; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px; border-radius: 16px; background: var(--surface-2); color: var(--text); border: 2px solid var(--brand-primary); box-shadow: var(--shadow-raised); font-size: 13px; }
+.alert-prompt span { flex: 1 1 100%; }
+@media (max-width: 760px) { .alert-prompt { bottom: calc(92px + env(safe-area-inset-bottom, 0px)); } }

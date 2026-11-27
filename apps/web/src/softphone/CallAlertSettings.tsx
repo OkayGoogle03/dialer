@@ -8,7 +8,13 @@ export function CallAlertSettings({ sp }: { sp: Softphone }) {
   return (
     <div className="call-alerts">
       {a.permission === 'default' && <div><Button size="small" variant="secondary" type="button" onClick={() => void a.allowAlerts()}>Turn on call alerts</Button> <span className="hint">A system notification when a call comes while you use another tab or app.</span></div>}
-      {a.permission === 'granted' && <span className="hint">Call alerts are on.</span>}
+      {a.permission === 'granted' && (
+        <div>
+          <Button size="small" variant="secondary" type="button" disabled={a.testing} onClick={a.testAlert}>{a.testing ? 'Test running…' : 'Test call alert'}</Button>{' '}
+          <span className="hint">{a.testing ? 'Switch to another app now: the alert starts in 5 seconds.' : 'Call alerts are on.'}</span>
+        </div>
+      )}
+      {a.touch && a.permission === 'granted' && <span className="hint">No sound or buzz? In the phone's settings, allow Chrome and this site to send notifications with sound and vibration, turn off silent mode and Do Not Disturb, and set Chrome's battery use to unrestricted.</span>}
       {a.permission === 'denied' && <span className="hint">Notifications are blocked for this site. Allow them in your browser's site settings to get call alerts.</span>}
       {a.touch && a.screenLockSupported && <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={a.keepScreenOn} onChange={(e) => a.setKeepScreenOn(e.target.checked)} /> Keep the screen on while waiting for calls (uses more battery)</label>}
       {a.touch && <span className="hint">Keep the Dialer open and in front. After the power button or a switch to another app, your phone may pause this page: calls can then be missed and sound can stop.</span>}

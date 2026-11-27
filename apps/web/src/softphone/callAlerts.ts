@@ -21,6 +21,11 @@ export const shouldKeepScreenOn = (o: { visible: boolean; inCall: boolean; regis
   o.visible && (o.inCall || (o.registered && o.touch && o.wanted));
 
 const TAG = 'dialer-call';
+/** On a phone the alert is repeated this often while the call rings, so it keeps sounding and buzzing like a ringing phone. */
+export const REPEAT_ALERT_MS = 4_000;
+/** A page in the background may not vibrate the phone itself (the browser refuses): the notification has to ask for it. */
+export const callNotificationOptions = (body: string) =>
+  ({ body, tag: TAG, requireInteraction: true, renotify: true, silent: false, vibrate: [500, 200, 500, 200, 500, 200, 500] }) as NotificationOptions;
 const WORKER = '/call-alerts-sw.js';
 
 export const notificationsSupported = () => typeof window !== 'undefined' && 'Notification' in window;
@@ -32,7 +37,7 @@ export async function prepareNotifications() {
 
 /** Shows the incoming-call notification and returns what closes it. */
 export async function showCallNotification(title: string, body: string): Promise<() => void> {
-  const options = { body, tag: TAG, requireInteraction: true };
+  const options = callNotificationOptions(body);
   try {
     const reg = await navigator.serviceWorker?.getRegistration(WORKER);
     if (reg?.active) {

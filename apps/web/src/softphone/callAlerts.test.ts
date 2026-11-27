@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alertState, shouldKeepScreenOn, shouldNotify } from './callAlerts';
+import { alertState, callNotificationOptions, shouldKeepScreenOn, shouldNotify } from './callAlerts';
 
 const ringing = { state: 'incoming', number: '4001', callerName: 'Asha' };
 
@@ -16,6 +16,11 @@ describe('call alerts', () => {
     expect(shouldNotify(ringing, { hidden: false, focused: true }, 'granted')).toBe(false);
     expect(shouldNotify(ringing, { hidden: true, focused: false }, 'default')).toBe(false);
     expect(shouldNotify({ state: 'in_call', number: '1' }, { hidden: true, focused: false }, 'granted')).toBe(false);
+  });
+
+  it('asks the notification to sound and vibrate again each time it is shown', () => {
+    expect(callNotificationOptions('4001')).toMatchObject({ body: '4001', tag: 'dialer-call', renotify: true, silent: false, requireInteraction: true });
+    expect((callNotificationOptions('4001') as { vibrate: number[] }).vibrate.length).toBeGreaterThan(1);
   });
 
   it('keeps the screen on during calls, and while waiting only on a phone that wants it', () => {
