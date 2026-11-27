@@ -89,7 +89,7 @@ password=$pw
 
 [$ext]
 type=aor
-max_contacts=2
+max_contacts=5
 remove_existing=yes
 EOF
 } >> "$F"

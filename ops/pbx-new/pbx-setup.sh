@@ -337,7 +337,11 @@ EOF
 ; 3-5 digit numbers ring another agent's extension; longer numbers go to the phone-network trunk
 exten => _XXX.,1,NoOp(agent ${CALLERID(num)} calls ${EXTEN})
  same => n,GotoIf($[${LEN(${EXTEN})} > 5]?outside)
- same => n,Dial(PJSIP/${EXTEN},30)
+; ring EVERY place the user is signed in (browser tabs, phone, desktop app): the first to answer takes the call, the others stop ringing.
+; With nobody signed in the list is empty and the plain dial fails as before.
+ same => n,Set(TARGETS=${PJSIP_DIAL_CONTACTS(${EXTEN})})
+ same => n,ExecIf($[${LEN(${TARGETS})} = 0]?Set(TARGETS=PJSIP/${EXTEN}))
+ same => n,Dial(${TARGETS},30)
  same => n,Hangup()
  same => n(outside),Goto(to-trunk,${EXTEN},1)
 exten => _+X.,1,Goto(to-trunk,${EXTEN:1},1)
