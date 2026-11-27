@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Alert, Badge, Button, Card, DataTable, PageHeader, TextField } from '@dialer/ui';
+import { Alert, Badge, Button, Card, DataTable, PageHeader, TextField, confirmDialog } from '@dialer/ui';
 import { createRoleSchema, fieldErrors } from '@dialer/validation';
 import { api, ApiError, RoleView } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -26,7 +26,7 @@ export function RolesPage() {
   }, [load]);
 
   async function remove(r: RoleView) {
-    if (!window.confirm(`Delete role "${r.name}"?`)) return;
+    if (!(await confirmDialog({ title: 'Delete role?', message: `The role "${r.name}" is deleted.`, confirmLabel: 'Delete', danger: true }))) return;
     try {
       await api.request('DELETE', `/roles/${r.id}`);
       await load();

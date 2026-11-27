@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, DataTable, PageHeader, SelectField, TextField } from '@dialer/ui';
+import { Alert, Button, Card, DataTable, PageHeader, SelectField, TextField, confirmDialog } from '@dialer/ui';
 import { api, saveBlob } from '../api/client';
 import type { UserView } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -27,7 +27,7 @@ export function CallListsPage() {
 
   async function deleteSelected() {
     const ids = [...sel.selected];
-    if (!window.confirm(`Delete ${ids.length} call list${ids.length === 1 ? '' : 's'} and their results? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ title: `Delete ${ids.length} call list${ids.length === 1 ? '' : 's'}?`, message: 'Their results are deleted too. This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return;
     setBulkBusy(true); setError(null);
     try {
       await api.post('/call-lists/delete', { ids });
@@ -87,7 +87,7 @@ export function CallListsPage() {
               <div className="row">
                 <Button size="small" variant="secondary" onClick={() => setOpen(open === l.id ? null : l.id)}>{open === l.id ? 'Hide' : 'View'}</Button>
                 <Button size="small" variant="secondary" onClick={() => exportList(l.id, setError)}>Export Excel</Button>
-                <Button size="small" variant="danger" onClick={() => window.confirm(`Delete list "${l.name}" and its results?`) && api.delete(`/call-lists/${l.id}`).then(() => { if (open === l.id) setOpen(null); return load(); }).catch((e) => setError(errText(e, 'Delete failed')))}>Delete</Button>
+                <Button size="small" variant="danger" onClick={async () => { if (await confirmDialog({ title: 'Delete call list?', message: `"${l.name}" and its results are deleted.`, confirmLabel: 'Delete', danger: true })) await api.delete(`/call-lists/${l.id}`).then(() => { if (open === l.id) setOpen(null); return load(); }).catch((e) => setError(errText(e, 'Delete failed'))); }}>Delete</Button>
               </div>
             ) },
           ]} />
@@ -106,7 +106,7 @@ function Rows({ id }: { id: string }) {
   useEffect(() => { sel.clear(); setMsg(null); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   async function deleteSelected() {
     const ids = [...sel.selected];
-    if (!window.confirm(`Delete ${ids.length} row${ids.length === 1 ? '' : 's'} from this list? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ title: `Delete ${ids.length} row${ids.length === 1 ? '' : 's'}?`, message: 'They are removed from this list. This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return;
     setBusy(true); setMsg(null);
     try {
       const r = await api.post<{ deleted: number; skipped: number }>(`/call-lists/${id}/items/delete`, { ids });

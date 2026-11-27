@@ -5,6 +5,7 @@ import { isNativeTransport, nativeAvailable, startNative } from './nativeEngine'
 import { createRejectionTracker, credentialRejectedMessage, isCredentialRejection } from './registrationRetry';
 import { createRingPlayer, ringLimitMs, ringSoundFor } from './ringing';
 import { createIceHurry } from './iceHurry';
+import { microphoneFor } from './soundDevices';
 import { recordIncoming } from './incomingLog';
 
 export interface SoftphoneAccount {
@@ -100,6 +101,8 @@ export function useSoftphone() {
   useEffect(() => { void loadDevices(); navigator.mediaDevices?.addEventListener?.('devicechange', loadDevices); return () => navigator.mediaDevices?.removeEventListener?.('devicechange', loadDevices); }, [loadDevices]);
   const sinkSupported = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
   useEffect(() => { const el = audio.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null; if (el?.setSinkId) void el.setSinkId(speakerId || 'default').catch(() => undefined); }, [speakerId, call.state]);
+  // microphones opened to switch devices during a call: the call library does not know them, so they are closed here when the call is over
+  const switched = useRef<MediaStreamTrack[]>([]);
   const mediaConstraints = () => ({ audio: micRef.current ? { deviceId: { exact: micRef.current } } : true, video: false });
   const rtcConfig = () => ({ iceServers: configRef.current?.iceServers?.length ? configRef.current.iceServers : [{ urls: 'stun:stun.l.google.com:19302' }] });
 
@@ -206,6 +209,7 @@ export function useSoftphone() {
           onRegistered: () => { if (keyRef.current !== key) return; setReg('registered'); setRegError(null); report(acct.id, 'registered'); },
           onFailed: (m) => { if (keyRef.current !== key) return; if (/rejected the SIP ID or password/i.test(m)) rejected.current.add(key); setReg('failed'); setRegError(`Registration failed: ${m}`); report(acct.id, 'failed', m); },
           onDisconnected: () => { if (keyRef.current !== key) return; setReg('failed'); setRegError('Connection to the call server was lost.'); report(acct.id, 'failed', 'connection lost'); },
+          sound: () => ({ mic: micRef.current, speaker: store('dialer.speakerId') }),
           onMissed: (from) => { if (accountRef.current) recordIncoming(api, accountRef.current.id, from).finished('failed', 'Missed: on another call'); },
           onIncoming: (s, from) => { if (session.current) { s.terminate(); if (accountRef.current) recordIncoming(api, accountRef.current.id, from).finished('failed', 'Missed: on another call'); return; } setError(null); wireSession(s, { ...IDLE_CALL, state: 'incoming', direction: 'in', number: from }); },
         });
@@ -383,7 +387,50 @@ export function useSoftphone() {
     if (m) s.mute({ audio: true }); else s.unmute({ audio: true });
     setCall((c) => ({ ...c, muted: m }));
   }, []);
+  /** Uses another microphone from now on; during a call the new one takes over at once (on Android this also moves the sound). */
+  const switchInput = useCallback(async (id: string) => {
+    const before = micRef.current;
+    micRef.current = id;
+    setMicId(id);
+    const s = session.current;
+    if (!s || callRef.current.state !== 'in_call') return; // not talking yet: the choice is used when the call connects
+    try {
+      if (typeof s.setInput === 'function') { await s.setInput(id); return; } // Windows app engine (UDP / TCP)
+      const sender = (s.connection as RTCPeerConnection | undefined)?.getSenders().find((x) => x.track?.kind === 'audio');
+      if (!sender) return;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { deviceId: { exact: id } } : true, video: false });
+      const track = stream.getAudioTracks()[0];
+      if (session.current !== s) { track.stop(); return; } // the call ended meanwhile
+      track.enabled = !callRef.current.muted;
+      const old = sender.track;
+      await sender.replaceTrack(track);
+      old?.stop();
+      switched.current.push(track);
+    } catch (e) {
+      micRef.current = before;
+      setMicId(before);
+      setError(`Could not switch to that sound device: ${e instanceof Error ? e.message : 'unknown reason'}`);
+    }
+  }, [setMicId]);
+
+  /** A choice made in the call popup: an output device (computers) or a route named by its microphone (Android). */
+  const chooseSound = useCallback(async (id: string, mode: 'output' | 'route' | 'none') => {
+    if (mode === 'route') return switchInput(id);
+    if (mode !== 'output') return;
+    setSpeakerId(id);
+    void session.current?.setOutput?.(id);
+    await switchInput(microphoneFor(id, devices));
+  }, [switchInput, setSpeakerId, devices]);
+
+  useEffect(() => {
+    if (call.state !== 'idle') return;
+    switched.current.forEach((t) => t.stop());
+    switched.current = [];
+  }, [call.state]);
+  // device names appear once the microphone has been allowed, which a first call does
+  useEffect(() => { if (call.state === 'in_call') void loadDevices(); }, [call.state, loadDevices]);
+
   const sendDtmf = useCallback((tone: string) => { try { session.current?.sendDTMF(tone); } catch { /* not connected */ } }, []);
 
-  return { devices, micId, setMicId, speakerId, setSpeakerId, grantMic, sinkSupported, config, account, accountId: account?.id ?? '', setAccountId, reg, regError, call, error, setError, loaded, dial, dialItem, hangup, answer, mute, sendDtmf, refresh, audio };
+  return { devices, micId, setMicId, speakerId, setSpeakerId, grantMic, sinkSupported, chooseSound, config, account, accountId: account?.id ?? '', setAccountId, reg, regError, call, error, setError, loaded, dial, dialItem, hangup, answer, mute, sendDtmf, refresh, audio };
 }

@@ -30,10 +30,31 @@ class AudioBridge {
   private offs: (() => void)[] = [];
   private queue: number[] = [];
   private pos = 0;
+  private src: MediaStreamAudioSourceNode | null = null;
+  private proc: ScriptProcessorNode | null = null;
 
-  async start(sip: NativeSip) {
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+  // "ideal": a remembered device that is no longer plugged in falls back to the default one instead of failing the call
+  private open = (mic: string) => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(mic ? { deviceId: { ideal: mic } } : {}) }, video: false });
+
+  /** The speaker used for the call ('' = default). Browsers without output choice ignore it. */
+  async setOutput(speaker: string) {
+    await (this.ctx as (AudioContext & { setSinkId?: (id: string) => Promise<void> }) | null)?.setSinkId?.(speaker).catch(() => undefined);
+  }
+
+  async setInput(mic: string) {
+    if (!this.ctx || !this.proc) return;
+    const next = await this.open(mic);
+    this.src?.disconnect();
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = next;
+    this.src = this.ctx.createMediaStreamSource(next);
+    this.src.connect(this.proc);
+  }
+
+  async start(sip: NativeSip, sound: { mic: string; speaker: string } = { mic: '', speaker: '' }) {
+    this.stream = await this.open(sound.mic);
     const ctx = (this.ctx = new AudioContext());
+    if (sound.speaker) await this.setOutput(sound.speaker);
     const ratio = ctx.sampleRate / 8000;
     const src = ctx.createMediaStreamSource(this.stream);
     const proc = ctx.createScriptProcessor(2048, 1, 1);
@@ -55,6 +76,7 @@ class AudioBridge {
       const used = Math.floor(this.pos); if (used > 0) { this.queue.splice(0, used); this.pos -= used; }
       if (this.queue.length > 3200) this.queue.splice(0, this.queue.length - 1600); // never build up more than ~400 ms of delay
     };
+    this.src = src; this.proc = proc;
     src.connect(proc); proc.connect(ctx.destination);
     this.offs.push(sip.onAudio((buf) => { const pcm = new Int16Array(buf); for (let i = 0; i < pcm.length; i++) this.queue.push(pcm[i]); }));
   }
@@ -70,13 +92,15 @@ export interface NativeAccount { host: string; port: number; transport: string; 
 
 /** Session object shaped like a JsSIP RTCSession (only what useSoftphone touches). */
 export class NativeSession extends Emitter {
-  constructor(private sip: NativeSip, private audio: AudioBridge) { super(); }
+  constructor(private sip: NativeSip, private audio: AudioBridge, private sound?: () => { mic: string; speaker: string }) { super(); }
+  setInput(mic: string) { return this.audio.setInput(mic); }
+  setOutput(speaker: string) { return this.audio.setOutput(speaker); }
   terminate() { void this.sip.hangup(); }
   answer() { void this.sip.answer(); }
   mute() { void this.sip.mute(true); }
   unmute() { void this.sip.mute(false); }
   sendDTMF(d: string) { void this.sip.dtmf(d); }
-  async openAudio() { try { await this.audio.start(this.sip); } catch { this.emit('failed', { cause: 'Microphone not available', message: undefined }); void this.sip.hangup(); } }
+  async openAudio() { try { await this.audio.start(this.sip, this.sound?.()); } catch { this.emit('failed', { cause: 'Microphone not available', message: undefined }); void this.sip.hangup(); } }
   closeAudio() { this.audio.stop(); }
 }
 
@@ -84,6 +108,8 @@ export interface NativeHandlers {
   onRegistered(): void; onFailed(msg: string): void; onDisconnected(): void; onIncoming(s: NativeSession, from: string): void;
   /** a second caller was turned away because a call was already in progress */
   onMissed?(from: string): void;
+  /** the microphone and speaker the person has chosen */
+  sound?(): { mic: string; speaker: string };
 }
 
 /** Starts the native engine for an account. Returns an object with the same call/stop shape the hook uses. */
@@ -100,7 +126,7 @@ export async function startNative(acct: NativeAccount, h: NativeHandlers) {
     else if (ev === 'call') {
       const state = d.state as string;
       if (state === 'missed') { h.onMissed?.(String(d.from ?? 'unknown')); return; }
-      if (state === 'incoming') { session = new NativeSession(sip, audio); unanswered = true; h.onIncoming(session, String(d.from ?? 'unknown')); return; }
+      if (state === 'incoming') { session = new NativeSession(sip, audio, h.sound); unanswered = true; h.onIncoming(session, String(d.from ?? 'unknown')); return; }
       if (!session) return;
       if (state === 'ringing') session.emit('progress', { response: { status_code: Number(d.code ?? 180) } });
       else if (state === 'in_call') { unanswered = false; session.emit('accepted'); void session.openAudio(); }
@@ -119,7 +145,7 @@ export async function startNative(acct: NativeAccount, h: NativeHandlers) {
   if (!r.ok) { off(); throw new Error(r.message ?? 'Could not start the SIP engine'); }
   return {
     async call(target: string) {
-      session = new NativeSession(sip, audio);
+      session = new NativeSession(sip, audio, h.sound);
       unanswered = false;
       const s = session;
       const res = await sip.call(target);

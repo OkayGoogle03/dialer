@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { confirmDialog, SelectField } from '@dialer/ui';
 import { api, ApiError, Page, UserView } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 
@@ -32,7 +33,7 @@ export function UsersPage() {
   }
 
   async function removeUser(u: UserView) {
-    if (!window.confirm(`Delete user ${u.email}? They can no longer sign in and their SIP accounts are removed. Call history is kept.`)) return;
+    if (!(await confirmDialog({ title: 'Delete user?', message: `${u.email} can no longer sign in and their SIP accounts are removed. Call history is kept.`, confirmLabel: 'Delete', danger: true }))) return;
     try { await api.delete(`/users/${u.id}`); await load(); } catch (e) { setError(e instanceof ApiError ? e.message : 'Delete failed'); }
   }
 
@@ -101,12 +102,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         <input id="nu-pw" type="password" autoComplete="new-password" required minLength={12} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         <span className="hint">At least 12 characters, including a letter and a digit.</span>
       </div>
-      <div className="field">
-        <label htmlFor="nu-role">Role</label>
-        <select id="nu-role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
-      </div>
+      <SelectField label="Role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} options={ROLES.map((r) => ({ value: r, label: r }))} />
       <button className="btn" disabled={busy}>{busy ? 'Creating…' : 'Create user'}</button>
     </form>
   );

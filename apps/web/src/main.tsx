@@ -17,6 +17,7 @@ import { CallListsPage } from './pages/CallListsPage';
 import { CallHistoryPage } from './pages/CallHistoryPage';
 import { DownloadPage } from './pages/DownloadPage';
 import { SoftphonePage } from './pages/SoftphonePage';
+import { DialogHost } from '@dialer/ui';
 import '@dialer/ui/styles.css';
 
 function RequireAuth({ children, perm }: { children: ReactNode; perm?: string }) {
@@ -67,6 +68,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      <DialogHost />
     </AuthProvider>
   </StrictMode>,
 );

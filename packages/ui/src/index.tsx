@@ -1,6 +1,8 @@
-import { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, useId } from 'react';
+import { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, useId } from 'react';
 
 export * from './charts';
+export * from './select';
+export * from './dialog';
 /** Reusable, accessible primitives. Styling lives in ./styles.css (design tokens overridable per tenant). */
 
 type Variant = 'primary' | 'secondary' | 'danger';
@@ -44,18 +46,6 @@ export function TextField({ label, hint, error, ...rest }: InputHTMLAttributes<H
       <label htmlFor={id}>{label}</label>
       <input id={id} aria-invalid={!!error || undefined} aria-describedby={hint || error ? `${id}-d` : undefined} {...rest} />
       {(error || hint) && <span id={`${id}-d`} className={error ? 'hint' : 'hint'} style={error ? { color: 'var(--danger)' } : undefined}>{error ?? hint}</span>}
-    </div>
-  );
-}
-
-export function SelectField({ label, options, ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { label: string; options: { value: string; label: string }[] }) {
-  const id = useId();
-  return (
-    <div className="field">
-      <label htmlFor={id}>{label}</label>
-      <select id={id} {...rest}>
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
     </div>
   );
 }

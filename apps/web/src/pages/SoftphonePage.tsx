@@ -1,12 +1,13 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Alert, Badge, Button, Card, DataTable, PageHeader, SelectField, TextField } from '@dialer/ui';
+import { Alert, Badge, Button, Card, DataTable, PageHeader, SelectField, TextField, confirmDialog } from '@dialer/ui';
 import { api } from '../api/client';
 import { Notice, errText } from '../components/kit';
 import type { CallListItem, CallListSummary } from '../api/types';
 import { CallListRows, ResultDonut, exportList, useListItems } from '../components/CallListRows';
 import { Softphone, useSharedSoftphone } from '../softphone/SoftphoneContext';
 import { BulkBar, useSelection } from '../components/selection';
+import { SoundPicker } from '../softphone/SoundPicker';
 
 interface LogCall { processName?: string | null; id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null; outcome?: { status: 'success' | 'not_success'; note: string } | null }
 
@@ -105,7 +106,7 @@ export function SoftphonePage() {
                   ? <SelectField label="Speaker" value={sp.speakerId} onChange={(e) => sp.setSpeakerId(e.target.value)}
                       options={[{ value: '', label: 'System default' }, ...sp.devices.speakers.filter((d) => d.deviceId && d.deviceId !== 'default').map((d, i) => ({ value: d.deviceId, label: d.label || `Speaker ${i + 1}` }))]} />
                   : <p className="hint" style={{ margin: 0 }}>This browser plays calls on the system default speaker (choosing a speaker needs Chrome or Edge).</p>}
-                <span className="hint">Applies to the next call. Remembered on this computer.</span>
+                <span className="hint">Remembered on this computer. During a call, switch under "Call sound".</span>
               </div>
             </details>
           )}
@@ -133,6 +134,7 @@ export function SoftphonePage() {
                     <strong>{sp.call.state === 'in_call' ? 'In call' : sp.call.state === 'ringing' ? 'Ringing…' : 'Dialling…'}</strong> <Timer since={sp.call.startedAt} />
                     {sp.call.note && <span className="hint"> · {sp.call.note}</span>}
                   </p>
+                  <SoundPicker sp={sp} />
                   <div className="row">
                     <Button type="button" variant="danger" onClick={sp.hangup}>Hang up</Button>
                     {sp.call.state === 'in_call' && <Button type="button" variant="secondary" onClick={sp.mute}>{sp.call.muted ? 'Unmute' : 'Mute'}</Button>}
@@ -226,7 +228,7 @@ function MyCallList({ sp }: { sp: Softphone }) {
   };
   async function deleteSelected() {
     const ids = [...sel.selected];
-    if (!listId || !window.confirm(`Delete ${ids.length} row${ids.length === 1 ? '' : 's'} from this list? This cannot be undone.`)) return;
+    if (!listId || !(await confirmDialog({ title: `Delete ${ids.length} row${ids.length === 1 ? '' : 's'}?`, message: 'They are removed from this list. This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return;
     setBulkBusy(true); setMsg(null);
     try {
       const r = await api.post<{ deleted: number; skipped: number }>(`/call-lists/${listId}/items/delete`, { ids });

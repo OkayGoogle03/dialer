@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, DataTable, PageHeader, TextField } from '@dialer/ui';
+import { Alert, Button, Card, DataTable, PageHeader, TextField, confirmDialog } from '@dialer/ui';
 import { fieldErrors, teamSchema } from '@dialer/validation';
 import { api, ApiError, Page, TeamView, UserView } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -24,7 +24,7 @@ export function TeamsPage() {
   useEffect(() => { load(); }, [load]);
 
   async function remove(t: TeamView) {
-    if (!window.confirm(`Delete team "${t.name}"? Members are kept but unassigned.`)) return;
+    if (!(await confirmDialog({ title: 'Delete team?', message: `"${t.name}" is deleted. Its members are kept but unassigned.`, confirmLabel: 'Delete', danger: true }))) return;
     try {
       await api.request('DELETE', `/teams/${t.id}`);
       await load();

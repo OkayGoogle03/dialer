@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Alert, Badge, Button, Card, DataTable, PageHeader, SelectField, TextField } from '@dialer/ui';
+import { Alert, Badge, Button, Card, DataTable, PageHeader, SelectField, TextField, promptDialog } from '@dialer/ui';
 import { createTenantSchema, fieldErrors } from '@dialer/validation';
 import { api, ApiError, Page, TenantSummary } from '../api/client';
 
@@ -29,7 +29,7 @@ export function PlatformTenantsPage() {
   }, [load]);
 
   async function suspend(t: TenantSummary) {
-    const reason = window.prompt(`Suspend ${t.name}? All users will be signed out. Reason:`);
+    const reason = await promptDialog({ title: `Suspend ${t.name}?`, message: 'All its users will be signed out.', inputLabel: 'Reason', minLength: 3, confirmLabel: 'Suspend', danger: true });
     if (!reason || reason.trim().length < 3) return;
     try {
       await api.post(`/platform/tenants/${t.id}/suspend`, { reason: reason.trim() });

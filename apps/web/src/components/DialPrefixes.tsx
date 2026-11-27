@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, DataTable, SelectField, TextField } from '@dialer/ui';
+import { Alert, Button, Card, DataTable, SelectField, TextField, confirmDialog } from '@dialer/ui';
 import { api } from '../api/client';
 import type { CallServerView } from '../api/types';
 import { errText } from './kit';
@@ -32,7 +32,7 @@ export function DialPrefixes({ servers }: { servers: CallServerView[] }) {
   }
 
   async function remove(p: Prefix) {
-    if (!window.confirm(`Remove prefix ${p.prefix} from ${p.callServerName}? Call list rows keep their own prefix.`)) return;
+    if (!(await confirmDialog({ title: `Remove prefix ${p.prefix}?`, message: `It is removed from ${p.callServerName}. Call list rows keep their own prefix.`, confirmLabel: 'Remove', danger: true }))) return;
     try { await api.post('/dial-prefixes/delete', { callServerId: p.callServerId, prefix: p.prefix }); await load(); } catch (e) { setError(errText(e, 'Remove failed')); }
   }
 

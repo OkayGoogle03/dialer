@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Badge, Button, Card, DataTable, PageHeader } from '@dialer/ui';
+import { Alert, Badge, Button, Card, DataTable, PageHeader, confirmDialog } from '@dialer/ui';
 import { ApiError, api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import type { CallServerView, Paged, SipAccountView } from '../api/types';
@@ -42,7 +42,7 @@ export function CallServersPage() {
   /** Deletes the ticked call servers one by one; a server that cannot be deleted (for example it has call history) is reported and the rest still go. */
   async function deleteSelected() {
     const ids = [...sel.selected];
-    if (!window.confirm(`Delete ${ids.length} call server${ids.length === 1 ? '' : 's'}? Their dial prefixes and the agents' SIP accounts on them are deleted too.`)) return;
+    if (!(await confirmDialog({ title: `Delete ${ids.length} call server${ids.length === 1 ? '' : 's'}?`, message: "Their dial prefixes and the agents' SIP accounts on them are deleted too.", confirmLabel: 'Delete', danger: true }))) return;
     setBulkBusy(true); setMsg(null);
     const failed: string[] = [];
     for (const id of ids) {
@@ -78,10 +78,10 @@ export function CallServersPage() {
           { key: 's', header: 'Status', render: (s) => <Badge tone={statusTone(s.status)}>{s.status === 'disabled' ? 'deactivated' : s.status.replace('_', ' ')}</Badge> },
           { key: 'a', header: '', render: (s) => manage && (
             <div className="row">
-              {s.status === 'active' ? <Button size="small" variant="secondary" onClick={() => window.confirm(`Deactivate call server "${s.name}"? All agents on it stop registering and cannot call until you activate it again.`) && act(() => api.put(`/call-servers/${s.id}`, { status: 'disabled' }))}>Deactivate</Button>
+              {s.status === 'active' ? <Button size="small" variant="secondary" onClick={async () => { if (await confirmDialog({ title: `Deactivate "${s.name}"?`, message: 'All agents on this call server stop registering and cannot call until you activate it again.', confirmLabel: 'Deactivate', danger: true })) await act(() => api.put(`/call-servers/${s.id}`, { status: 'disabled' })); }}>Deactivate</Button>
                 : <Button size="small" variant="secondary" onClick={() => act(() => api.put(`/call-servers/${s.id}`, { status: 'active' }))}>Activate</Button>}
               <Button size="small" variant="secondary" onClick={() => setForm(s)}>Edit</Button>
-              <Button size="small" variant="danger" onClick={() => window.confirm(`Delete call server "${s.name}"? Its dial prefixes and the agents' SIP accounts on it are deleted too.`) && act(() => api.delete(`/call-servers/${s.id}`))}>Delete</Button>
+              <Button size="small" variant="danger" onClick={async () => { if (await confirmDialog({ title: `Delete "${s.name}"?`, message: "This call server, its dial prefixes and the agents' SIP accounts on it are deleted.", confirmLabel: 'Delete', danger: true })) await act(() => api.delete(`/call-servers/${s.id}`)); }}>Delete</Button>
             </div>
           ) },
         ]} />
@@ -111,7 +111,7 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
   /** Removes the ticked SIP accounts one by one; failures are listed and the rest still go. */
   async function deleteSelected() {
     const ids = [...sel.selected];
-    if (!window.confirm(`Remove ${ids.length} SIP account${ids.length === 1 ? '' : 's'}? The agents' softphones stop registering with them.`)) return;
+    if (!(await confirmDialog({ title: `Remove ${ids.length} SIP account${ids.length === 1 ? '' : 's'}?`, message: "The agents' softphones stop registering with them.", confirmLabel: 'Remove', danger: true }))) return;
     setBulkBusy(true); setNotice(null);
     const failed: string[] = [];
     for (const id of ids) {
@@ -125,7 +125,7 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
 
   /** Switches one agent's SIP account on or off. Deactivated: the agent's softphone unregisters within seconds and cannot place calls; the account and password are kept. */
   async function setActive(a: SipAccountView, active: boolean) {
-    if (!active && !window.confirm(`Deactivate SIP account ${a.sipId} (${a.userName})? Their softphone stops registering until you activate it again.`)) return;
+    if (!active && !(await confirmDialog({ title: `Deactivate SIP account ${a.sipId}?`, message: `The softphone of ${a.userName} stops registering until you activate it again.`, confirmLabel: 'Deactivate', danger: true }))) return;
     setBusyId(a.id); setNotice(null);
     try {
       await api.put(`/softphone-accounts/${a.id}`, { status: active ? 'active' : 'disabled' });
@@ -179,7 +179,7 @@ function SipAccounts({ servers }: { servers: CallServerView[] }) {
             <div className="row">
               <Button size="small" variant="secondary" disabled={busyId === a.id} onClick={() => void setActive(a, a.status !== 'active')}>{a.status === 'active' ? 'Deactivate' : 'Activate'}</Button>
               <Button size="small" variant="secondary" onClick={() => setForm(a)}>Edit</Button>
-              <Button size="small" variant="danger" onClick={() => window.confirm(`Remove SIP account ${a.sipId}?`) && api.delete(`/softphone-accounts/${a.id}`).then(load).catch((e) => setError(errText(e, 'Delete failed')))}>Remove</Button>
+              <Button size="small" variant="danger" onClick={async () => { if (await confirmDialog({ title: `Remove SIP account ${a.sipId}?`, message: `The softphone of ${a.userName} stops registering with it.`, confirmLabel: 'Remove', danger: true })) await api.delete(`/softphone-accounts/${a.id}`).then(load).catch((e) => setError(errText(e, 'Delete failed'))); }}>Remove</Button>
             </div>
           ) },
         ]} />
