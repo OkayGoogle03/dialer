@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Alert, Badge, Button, Card, DataTable, PageHeader, confirmDialog } from '@dialer/ui';
 import { ApiError, api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
@@ -18,6 +19,8 @@ const TRANSPORTS = [
   { value: 'tls', label: 'Windows desktop app: TLS' },
 ];
 const MODE_LABEL = { direct: 'Direct browser-to-PBX', bridge: 'Windows desktop app' } as const;
+const TABS = [{ key: 'server', label: 'Server' }, { key: 'sip', label: 'SIP' }, { key: 'prefixes', label: 'Prefixes' }] as const;
+type Tab = (typeof TABS)[number]['key'];
 
 const fields = [
   { name: 'name', label: 'Server name', required: true },
@@ -33,6 +36,9 @@ const fields = [
 export function CallServersPage() {
   const { can } = useAuth();
   const manage = can('call_servers:manage');
+  // the open tab is part of the address, so a reload or a shared link stays on it; SIP accounts and prefixes are for managers only
+  const [params, setParams] = useSearchParams();
+  const tab: Tab = (manage && TABS.find((t) => t.key === params.get('tab'))?.key) || 'server';
   const { items, error, reload, setError } = useList<CallServerView>('/call-servers?limit=200');
   const [form, setForm] = useState<'new' | CallServerView | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -59,9 +65,15 @@ export function CallServersPage() {
 
   return (
     <>
-      <PageHeader title="Call Servers" actions={manage && <Button onClick={() => setForm(form ? null : 'new')}>{form ? 'Close' : 'Add call server'}</Button>} />
+      <PageHeader title="Call Servers" actions={manage && tab === 'server' && <Button onClick={() => setForm(form ? null : 'new')}>{form ? 'Close' : 'Add call server'}</Button>} />
+      {manage && (
+        <div className="seg page-tabs" role="group" aria-label="Call server sections">
+          {TABS.map((t) => <button key={t.key} type="button" aria-pressed={tab === t.key} onClick={() => setParams(t.key === 'server' ? {} : { tab: t.key }, { replace: true })}>{t.label}</button>)}
+        </div>
+      )}
+      {tab === 'server' && <>
       <Notice>
-        Agents' softphones register with the call server listed here, using their own SIP ID (see SIP accounts below). The server's IP can change: edit the address and agents reconnect to the new one within a few minutes. Changing the address does not deactivate the server.
+        Agents' softphones register with the call server listed here, using their own SIP ID (see the SIP tab). The server's IP can change: edit the address and agents reconnect to the new one within a few minutes. Changing the address does not deactivate the server.
       </Notice>
       {msg && <Alert tone={msg.ok ? 'success' : 'error'}>{msg.text}</Alert>}
       {form && <ConfigForm title={form === 'new' ? 'New call server' : `Edit ${form.name}`} fields={fields} initial={form === 'new' ? { sipTransport: 'wss', sipWsPath: '/ws', autoCutEnabled: true } : (form as unknown as Record<string, unknown>)}
@@ -85,8 +97,11 @@ export function CallServersPage() {
             </div>
           ) },
         ]} />
-      {manage && <SipAccounts servers={items ?? []} />}
-      {manage && <DialPrefixes servers={items ?? []} />}
+      </>}
+      {/* the other tabs need the server list: say why it is missing */}
+      {tab !== 'server' && error && <Alert>{error}</Alert>}
+      {tab === 'sip' && <SipAccounts servers={items ?? []} />}
+      {tab === 'prefixes' && <DialPrefixes servers={items ?? []} />}
     </>
   );
 }

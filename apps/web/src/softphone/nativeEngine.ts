@@ -54,6 +54,8 @@ class AudioBridge {
   async start(sip: NativeSip, sound: { mic: string; speaker: string } = { mic: '', speaker: '' }) {
     this.stream = await this.open(sound.mic);
     const ctx = (this.ctx = new AudioContext());
+    if (ctx.state === 'suspended') await ctx.resume().catch(() => undefined); // a suspended context is silent both ways
+    ctx.onstatechange = () => { if (this.ctx === ctx && ctx.state === 'suspended') void ctx.resume().catch(() => undefined); };
     if (sound.speaker) await this.setOutput(sound.speaker);
     const ratio = ctx.sampleRate / 8000;
     const src = ctx.createMediaStreamSource(this.stream);

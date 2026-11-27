@@ -4,8 +4,10 @@ import { errText } from '../components/kit';
 import { isNativeTransport, nativeAvailable, startNative } from './nativeEngine';
 import { createRejectionTracker, credentialRejectedMessage, isCredentialRejection } from './registrationRetry';
 import { createRingPlayer, ringLimitMs, ringSoundFor } from './ringing';
-import { createIceHurry } from './iceHurry';
+import { createIceHurry, hasRelay } from './iceHurry';
 import { microphoneFor } from './soundDevices';
+import { useCallAlerts } from './useCallAlerts';
+import { useCallAudio } from './useCallAudio';
 import { recordIncoming } from './incomingLog';
 
 export interface SoftphoneAccount {
@@ -123,19 +125,15 @@ export function useSoftphone() {
     if (id) api.patch(`/softphone/calls/${id}`, { status, ...extra }).catch(() => undefined);
   }, []);
 
-  /** Plays the other party's audio. For an OUTGOING call JsSIP creates the peer connection inside ua.call() (before it returns), so this must be
-   *  registered through the call's eventHandlers, not with session.on() afterwards: a late listener never fires and the caller hears nothing. */
-  const attachRemoteAudio = useCallback((pc: RTCPeerConnection) => {
-    pc.ontrack = (ev: RTCTrackEvent) => {
-      if (audio.current && ev.streams[0]) { audio.current.srcObject = ev.streams[0]; void audio.current.play().catch(() => undefined); }
-    };
-  }, []);
+  const keepTrack = useCallback((t: MediaStreamTrack) => { switched.current.push(t); }, []);
+  const voice = useCallAudio({ call, session, audio, micId: micRef, opened: keepTrack });
+  const { attachRemoteAudio } = voice;
 
   const wireSession = useCallback((s: any, base: ActiveCall) => {
     session.current = s;
     setCall(base);
     // do not wait for the browser to try every network route before sending the offer / answer (iceHurry.ts)
-    s.on('icecandidate', createIceHurry());
+    s.on('icecandidate', createIceHurry({ relayExpected: hasRelay(configRef.current?.iceServers) }));
     s.on('getusermediafailed', (e: any) => setError(`The microphone could not be opened (${e?.name ?? e?.message ?? 'unknown reason'}). Check it under "Microphone and speaker" on the Softphone, and allow the microphone for this site.`));
     // received calls are recorded for the call history
     const log = base.direction === 'in' && accountRef.current ? recordIncoming(api, accountRef.current.id, base.number, base.callerName) : null;
@@ -308,6 +306,23 @@ export function useSoftphone() {
     return () => { clearInterval(t); window.removeEventListener('focus', onFocus); window.removeEventListener('online', onFocus); stopUa(); };
   }, [refresh, stopUa]);
 
+  // Back from another app, a locked screen or sleep, or the network returned: the connection may be dead without the page knowing.
+  // Register again at once instead of waiting (never during a call, and never with a password the server has rejected).
+  useEffect(() => {
+    let last = 0;
+    const resume = () => {
+      if (document.visibilityState !== 'visible' || session.current || Date.now() - last < 3000) return;
+      last = Date.now();
+      const u = ua.current;
+      if (rejected.current.has(keyRef.current)) return;
+      if (u?.register && u.isConnected?.()) u.register(); // browser engine: refresh the registration now
+      else { keyRef.current = ''; void refresh(); }
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('online', resume);
+    return () => { document.removeEventListener('visibilitychange', resume); window.removeEventListener('online', resume); };
+  }, [refresh]);
+
   // while not registered, retry and re-read the (possibly changed) server address
   useEffect(() => {
     if (reg !== 'failed' || rejected.current.has(keyRef.current)) return; // a rejected password is not retried (registrationRetry.ts)
@@ -432,5 +447,7 @@ export function useSoftphone() {
 
   const sendDtmf = useCallback((tone: string) => { try { session.current?.sendDTMF(tone); } catch { /* not connected */ } }, []);
 
-  return { devices, micId, setMicId, speakerId, setSpeakerId, grantMic, sinkSupported, chooseSound, config, account, accountId: account?.id ?? '', setAccountId, reg, regError, call, error, setError, loaded, dial, dialItem, hangup, answer, mute, sendDtmf, refresh, audio };
+  const alerts = useCallAlerts(call, reg === 'registered');
+
+  return { voice, relayConfigured: hasRelay(config?.iceServers), alerts, devices, micId, setMicId, speakerId, setSpeakerId, grantMic, sinkSupported, chooseSound, config, account, accountId: account?.id ?? '', setAccountId, reg, regError, call, error, setError, loaded, dial, dialItem, hangup, answer, mute, sendDtmf, refresh, audio };
 }

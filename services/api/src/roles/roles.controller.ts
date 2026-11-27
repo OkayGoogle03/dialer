@@ -55,7 +55,9 @@ export class RolesService {
 
   async update(actor: AuthUser, id: string, dto: UpdateRoleDto, ctx: RequestContext) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
-      const role = await this.mustGetCustom(tx, id);
+      const role = await this.mustGet(tx, id);
+      // built-in roles can be adjusted; Tenant Admin stays as it is, so there is always someone who can put things right
+      if (role.key === 'tenant_admin' && role.is_system) throw new BadRequestException('The Tenant Admin role cannot be changed');
       if (dto.permissions) {
         assertKnown(dto.permissions);
         // Must hold both what is removed and what is added (cannot strip permissions you cannot grant back).
@@ -83,9 +85,14 @@ export class RolesService {
   }
 
   private async mustGetCustom(tx: SqlRunner, id: string) {
+    const role = await this.mustGet(tx, id);
+    if (role.is_system) throw new BadRequestException('Built-in roles cannot be deleted');
+    return role;
+  }
+
+  private async mustGet(tx: SqlRunner, id: string) {
     const [role] = await tx.query<{ key: string; is_system: boolean }>(`SELECT \`key\`, is_system FROM roles WHERE tenant_id = :tenantId AND record_status = 1 AND id = :id FOR UPDATE`, { id });
     if (!role) throw new NotFoundException('Role not found');
-    if (role.is_system) throw new BadRequestException('System roles cannot be modified');
     return role;
   }
 

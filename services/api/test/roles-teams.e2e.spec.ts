@@ -27,7 +27,7 @@ describe('Roles & Teams APIs (TiDB)', () => {
     expect(perms.body.length).toBe(31);
   });
 
-  it('creates, updates and deletes a custom role; system roles are immutable', async () => {
+  it('creates, updates and deletes a custom role; built-in roles can be edited but not deleted, Tenant Admin not even edited', async () => {
     const created = await t.http.post('/api/v1/roles').set(bearer(admin))
       .send({ key: 'qa_analyst', name: 'QA Analyst', permissions: ['recordings:read', 'reports:read'] }).expect(201);
     expect(created.body).toMatchObject({ key: 'qa_analyst', isSystem: false, permissions: ['recordings:read', 'reports:read'] });
@@ -38,8 +38,14 @@ describe('Roles & Teams APIs (TiDB)', () => {
     expect(upd.body.permissions).toEqual(['reports:read']);
 
     const sys = (await t.http.get('/api/v1/roles').set(bearer(admin))).body.find((r: { key: string }) => r.key === 'agent');
-    await t.http.patch(`/api/v1/roles/${sys.id}`).set(bearer(admin)).send({ name: 'Hacked' }).expect(400);
     await t.http.delete(`/api/v1/roles/${sys.id}`).set(bearer(admin)).expect(400);
+    const edited = await t.http.patch(`/api/v1/roles/${sys.id}`).set(bearer(admin)).send({ name: 'Caller', permissions: [...sys.permissions, 'reports:read'] }).expect(200);
+    expect(edited.body).toMatchObject({ key: 'agent', name: 'Caller', isSystem: true });
+    expect(edited.body.permissions).toContain('reports:read');
+    await t.http.patch(`/api/v1/roles/${sys.id}`).set(bearer(admin)).send({ name: sys.name, permissions: sys.permissions }).expect(200);
+    const top = (await t.http.get('/api/v1/roles').set(bearer(admin))).body.find((r: { key: string }) => r.key === 'tenant_admin');
+    await t.http.patch(`/api/v1/roles/${top.id}`).set(bearer(admin)).send({ permissions: [] }).expect(400);
+    await t.http.delete(`/api/v1/roles/${top.id}`).set(bearer(admin)).expect(400);
 
     await t.http.delete(`/api/v1/roles/${created.body.id}`).set(bearer(admin)).expect(204);
     // soft delete: hidden from the API, still in the table with record_status 0, and its key can be used again

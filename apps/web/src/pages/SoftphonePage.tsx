@@ -8,6 +8,8 @@ import { CallListRows, ResultDonut, exportList, useListItems } from '../componen
 import { Softphone, useSharedSoftphone } from '../softphone/SoftphoneContext';
 import { BulkBar, useSelection } from '../components/selection';
 import { SoundPicker } from '../softphone/SoundPicker';
+import { CallAudioStatus } from '../softphone/CallAudioStatus';
+import { CallAlertSettings } from '../softphone/CallAlertSettings';
 
 interface LogCall { processName?: string | null; id: string; status: string; from: string; dialed: string; entered: string | null; prefix: string | null; startedAt: string; durationSeconds: number | null; hangupCause: string | null; outcome?: { status: 'success' | 'not_success'; note: string } | null }
 
@@ -69,7 +71,7 @@ export function SoftphonePage() {
     return (
       <>
         <PageHeader title="Softphone" />
-        <Notice>You do not have a SIP account yet. Ask your administrator to add one for you (Call Servers → SIP accounts), with the call server and SIP ID to register.</Notice>
+        <Notice>You do not have a SIP account yet. Ask your administrator to add one for you (Call Servers → SIP tab), with the call server and SIP ID to register.</Notice>
         {sp.error && <Alert>{sp.error}</Alert>}
       </>
     );
@@ -82,6 +84,7 @@ export function SoftphonePage() {
       <Notice>
         Your phone registers with the call server your administrator configured, using your own SIP ID. Dial a number (or use your call list); the prefix is added automatically. If the server's IP changes, this page picks up the new address on its own.
       </Notice>
+      <CallAlertSettings sp={sp} />
       {sp.regError && <Alert>{sp.regError}</Alert>}
       {sp.error && <Alert>{sp.error}</Alert>}
       {sp.call.note && sp.call.state === 'idle' && <Alert tone={sp.call.noteOk ? 'success' : 'error'}>{sp.call.note}</Alert>}
@@ -93,6 +96,7 @@ export function SoftphonePage() {
             <div><span className="hint">Call server</span><b>{sp.account?.callServer.name ?? '—'}</b></div>
             <div><span className="hint">Connection</span><b>{REG_LABEL[sp.reg]}</b></div>
             <div><span className="hint">Call</span><b>{CALL_LABEL[sp.call.state]}</b></div>
+            {direct && <div><span className="hint">Voice relay</span><b>{sp.relayConfigured ? 'Set up' : 'Not set up'}</b></div>}
           </div>
           {direct && sp.account?.callServer.webrtcUrl && <p className="hint" style={{ margin: '0 0 8px' }}>{sp.account.callServer.webrtcUrl}</p>}
           {direct && (
@@ -134,6 +138,7 @@ export function SoftphonePage() {
                     <strong>{sp.call.state === 'in_call' ? 'In call' : sp.call.state === 'ringing' ? 'Ringing…' : 'Dialling…'}</strong> <Timer since={sp.call.startedAt} />
                     {sp.call.note && <span className="hint"> · {sp.call.note}</span>}
                   </p>
+                  <CallAudioStatus sp={sp} />
                   <SoundPicker sp={sp} />
                   <div className="row">
                     <Button type="button" variant="danger" onClick={sp.hangup}>Hang up</Button>

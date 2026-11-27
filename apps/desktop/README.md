@@ -13,6 +13,9 @@ First run asks for the server address (https://…; http only for localhost). Ch
 Call servers set to **wss / ws** use the same SIP-over-WebSocket/WebRTC stack as the browser. Call servers set to **udp / tcp** use the
 built-in SIP engine (`sip/sip-ua.js`, G.711 and DTMF) running on this computer.
 
+Since 0.6.0, closing the window keeps the app running in the system tray (Quit is in the tray menu), a ringing call brings the window forward with
+a Windows alert, and the PC is kept from sleeping by itself during calls. It cannot receive calls while the PC sleeps or is off.
+
 UDP / TCP calling works only inside this app's window. A normal browser can call only through wss / ws call servers.
 
 Activate / deactivate (Call Servers page, per call server or per SIP account) works inside this app too: the page checks every few seconds,

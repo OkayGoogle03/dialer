@@ -11,7 +11,7 @@ export function DownloadPage() {
   return (
     <>
       <PageHeader title="Desktop App" />
-      <Notice>For UDP or TCP call servers, call from inside the Windows app's own window; a normal browser cannot use them. On first start enter this site's address; then sign in as usual.</Notice>
+      <Notice>For UDP or TCP call servers, call from inside the Windows app's own window; a normal browser cannot use them. On first start enter this site's address; then sign in as usual. Closing the app's window keeps it running next to the clock so calls still arrive; choose Quit there to stop it.</Notice>
       {error && <Alert>{error}</Alert>}
       <Card title="Windows (64-bit)" className="stack">
         {info?.available && info.url ? (

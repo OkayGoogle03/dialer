@@ -4,6 +4,7 @@ import { GripHorizontal } from 'lucide-react';
 import { Alert, Button } from '@dialer/ui';
 import { clampPosition, Point } from './popupPosition';
 import { SoundPicker } from './SoundPicker';
+import { CallAudioStatus } from './CallAudioStatus';
 import type { Softphone } from './SoftphoneContext';
 
 const TITLE: Record<string, string> = { dialing: 'Dialling…', ringing: 'Ringing…', in_call: 'In call', incoming: 'Incoming call' };
@@ -77,6 +78,7 @@ export function CallPopup({ sp }: { sp: Softphone }) {
             <Button variant="danger" onClick={sp.hangup}>Hang up</Button>
           </div>
         )}
+        <CallAudioStatus sp={sp} />
         <SoundPicker sp={sp} />
         {!onPhoneScreen && <Link to="/softphone" className="hint">Open Softphone</Link>}
       </div>

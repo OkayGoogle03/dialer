@@ -38,7 +38,7 @@ export function RolesPage() {
   return (
     <>
       <PageHeader title="Roles" actions={<Button onClick={() => setEditing(editing ? null : 'new')}>{editing ? 'Close' : 'New role'}</Button>} />
-      {editing && <RoleForm role={editing === 'new' ? null : editing} catalogue={catalogue} onSaved={() => { setEditing(null); load(); }} />}
+      {editing && <RoleForm key={editing === 'new' ? 'new' : editing.id} role={editing === 'new' ? null : editing} catalogue={catalogue} onSaved={() => { setEditing(null); load(); }} />}
       {error && <Alert>{error}</Alert>}
       <DataTable
         rows={roles}
@@ -48,10 +48,10 @@ export function RolesPage() {
           { key: 'perms', header: 'Permissions', render: (r) => r.permissions.length === catalogue.length && catalogue.length ? <Badge>all</Badge> : r.permissions.map((p) => <Badge key={p}>{p}</Badge>) },
           { key: 'users', header: 'Users', render: (r) => r.userCount },
           {
-            key: 'actions', header: '', render: (r) => r.isSystem ? null : (
+            key: 'actions', header: '', render: (r) => r.isSystem && r.key === 'tenant_admin' ? <span className="hint">Always has full access</span> : (
               <div className="row">
-                <Button size="small" variant="secondary" onClick={() => setEditing(r)}>Edit</Button>
-                <Button size="small" variant="danger" onClick={() => remove(r)}>Delete</Button>
+                <Button size="small" variant="secondary" onClick={() => { setEditing(r); window.scrollTo({ top: 0 }); }}>Edit</Button>
+                {!r.isSystem && <Button size="small" variant="danger" onClick={() => remove(r)}>Delete</Button>}
               </div>
             ),
           },
@@ -100,6 +100,7 @@ function RoleForm({ role, catalogue, onSaved }: { role: RoleView | null; catalog
     <Card title={role ? `Edit ${role.name}` : 'New role'}>
       <form onSubmit={submit} noValidate>
         {error && <Alert>{error}</Alert>}
+        {role?.isSystem && <p className="hint">This is a built-in role. Changes apply to everyone who has it.</p>}
         <div className="row">
           <TextField label="Key" value={key} disabled={!!role} onChange={(e) => setKey(e.target.value.toLowerCase())} error={errs.key} hint="e.g. quality_analyst" />
           <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} error={errs.name} />
@@ -114,6 +115,7 @@ function RoleForm({ role, catalogue, onSaved }: { role: RoleView | null; catalog
             ))}
           </div>
         </fieldset>
+        {role && <p className="hint">People with this role get the change within 15 minutes, or as soon as they sign in again.</p>}
         <Button busy={busy}>{role ? 'Save' : 'Create role'}</Button>
       </form>
     </Card>

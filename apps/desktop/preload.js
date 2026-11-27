@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
   getServer: () => ipcRenderer.invoke('desktop:get-server'),
   setServer: (v) => ipcRenderer.invoke('desktop:set-server', v),
+  // the page reports calls, so the app can alert, come forward and stay awake
+  callState: (s) => ipcRenderer.send('desktop:call-state', { state: String(s?.state ?? ''), title: String(s?.title ?? ''), body: String(s?.body ?? '') }),
   // native SIP engine (UDP/TCP) running on this computer
   sip: {
     start: (cfg) => ipcRenderer.invoke('sip:start', cfg),
