@@ -2,7 +2,7 @@
 export interface Paged<T> { items: T[]; total: number; limit: number; offset: number }
 
 export interface CallServerView {
-  id: string; name: string; host: string | null; port: number | null; sipTransport: string; connectionMode?: 'direct' | 'bridge'; sipWsPath: string; sipRealm: string | null; addressUpdatedAt: string | null; webrtcUrl: string | null; instanceId: string | null; ariUrl: string | null; ariUsername: string | null; hasPassword: boolean;
+  id: string; name: string; host: string | null; port: number | null; sipTransport: string; connectionMode?: 'direct' | 'bridge'; sipWsPath: string; sipRealm: string | null; addressUpdatedAt: string | null; autoCutEnabled?: boolean; autoCutSeconds?: number | null; webrtcUrl: string | null; instanceId: string | null; ariUrl: string | null; ariUsername: string | null; hasPassword: boolean;
   environment: string; connectionStatus: string; connectionError: string | null; maxConcurrentCalls: number; status: string;
 }
 

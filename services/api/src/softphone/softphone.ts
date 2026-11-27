@@ -208,7 +208,7 @@ export class SoftphoneService {
   config(actor: AuthUser, ctx: RequestContext) {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const rows = await tx.query(
-        `SELECT a.id, a.sip_id, a.display_name, a.sip_secret_encrypted, s.id AS server_id, s.name AS server_name, s.host, s.port, s.sip_transport, s.sip_ws_path, s.sip_realm, s.address_updated_at
+        `SELECT a.id, a.sip_id, a.display_name, a.sip_secret_encrypted, s.id AS server_id, s.name AS server_name, s.host, s.port, s.sip_transport, s.sip_ws_path, s.sip_realm, s.address_updated_at, s.auto_cut_enabled, s.auto_cut_seconds
            FROM softphone_accounts a JOIN call_servers s ON s.id = a.call_server_id AND s.tenant_id = :tenantId AND s.deleted_at IS NULL AND s.status = 'active'
           WHERE a.tenant_id = :tenantId AND a.user_id = :me AND a.deleted_at IS NULL AND a.status = 'active' ORDER BY s.name`, { me: actor.userId });
       const options = rows.length
@@ -229,6 +229,8 @@ export class SoftphoneService {
             id: r.server_id, name: r.server_name, host: r.host, port: r.port ?? (r.sip_transport === 'udp' || r.sip_transport === 'tcp' ? 5060 : r.sip_transport === 'tls' ? 5061 : null), transport: r.sip_transport, wsPath: r.sip_ws_path, realm: r.sip_realm || r.host,
             webrtcUrl: webrtcUrl(r.host, r.port, r.sip_transport, r.sip_ws_path), addressUpdatedAt: iso(r.address_updated_at),
             connectionMode: connectionMode(r.sip_transport),
+            // how long an unanswered outgoing call may ring before the softphone cuts it; null = auto cut is off
+            ringLimitSeconds: r.auto_cut_enabled ? Number(r.auto_cut_seconds ?? this.appConfig.ringTimeoutSeconds) : null,
           },
         })),
         dialOptions,

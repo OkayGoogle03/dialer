@@ -31,6 +31,8 @@ export const callServerCreateSchema = z.object({
   ariPassword: ariPassword.optional(),
   environment: z.enum(['production', 'staging', 'development']).default('production'),
   maxConcurrentCalls: intRange(1, 100_000).default(100),
+  autoCutEnabled: z.boolean().default(true),
+  autoCutSeconds: intRange(1, 120).nullable().optional(),
 }).strict();
 
 export const callServerUpdateSchema = z.object({
@@ -46,12 +48,14 @@ export const callServerUpdateSchema = z.object({
   ariPassword: ariPassword.optional(),
   environment: z.enum(['production', 'staging', 'development']).optional(),
   maxConcurrentCalls: intRange(1, 100_000).optional(),
+  autoCutEnabled: z.boolean().optional(),
+  autoCutSeconds: intRange(1, 120).nullable().optional(),
   status: z.enum(['pending_configuration', 'active', 'disabled']).optional(),
 }).strict();
 
 const COLS = `s.id, s.name, s.host, s.port, s.sip_transport, s.sip_ws_path, s.sip_realm, s.address_updated_at, s.instance_id, s.ari_url, s.ari_username,
   s.ari_secret_encrypted IS NOT NULL AS has_password, s.environment, s.connection_status, s.connection_checked_at, s.connection_error,
-  s.max_concurrent_calls, s.status, s.created_at`;
+  s.max_concurrent_calls, s.status, s.created_at, s.auto_cut_enabled, s.auto_cut_seconds`;
 
 /** Default WebSocket port per transport when the admin has not set one (Asterisk: 8089 for wss, 8088 for ws). */
 const defaultPort = (transport: string) => (transport === 'ws' ? 8088 : 8089);
@@ -71,7 +75,7 @@ export const callServerView = (r: Row) => ({
   addressUpdatedAt: iso(r.address_updated_at), webrtcUrl: webrtcUrl(r.host, r.port, r.sip_transport, r.sip_ws_path),
   instanceId: r.instance_id, ariUrl: r.ari_url, ariUsername: r.ari_username, hasPassword: !!r.has_password,
   environment: r.environment, connectionStatus: r.connection_status, connectionCheckedAt: iso(r.connection_checked_at), connectionError: r.connection_error,
-  maxConcurrentCalls: r.max_concurrent_calls, status: r.status, createdAt: iso(r.created_at),
+  maxConcurrentCalls: r.max_concurrent_calls, status: r.status, autoCutEnabled: !!r.auto_cut_enabled, autoCutSeconds: r.auto_cut_seconds, createdAt: iso(r.created_at),
 });
 
 const ADDRESS = ['host', 'port', 'sipTransport', 'sipWsPath', 'sipRealm'];
@@ -101,11 +105,11 @@ export class CallServersService {
     return this.db.withTenant(actor.tenantId, async (tx) => {
       const id = newId();
       await tx.execute(
-        `INSERT INTO call_servers (id, tenant_id, name, host, port, sip_transport, sip_ws_path, sip_realm, address_updated_at, instance_id, ari_url, ari_username, ari_secret_encrypted, environment, max_concurrent_calls, created_by)
-         VALUES (:id, :tenantId, :n, :h, :port, :tr, :wp, :realm, :au, :inst, :url, :u, :secret, :env, :m, :by)`,
+        `INSERT INTO call_servers (id, tenant_id, name, host, port, sip_transport, sip_ws_path, sip_realm, address_updated_at, instance_id, ari_url, ari_username, ari_secret_encrypted, environment, max_concurrent_calls, auto_cut_enabled, auto_cut_seconds, created_by)
+         VALUES (:id, :tenantId, :n, :h, :port, :tr, :wp, :realm, :au, :inst, :url, :u, :secret, :env, :m, :ace, :acs, :by)`,
         { id, n: dto.name, h: dto.host ?? null, port: dto.port ?? null, tr: dto.sipTransport, wp: dto.sipWsPath, realm: dto.sipRealm ?? null, au: dto.host ? new Date() : null,
           inst: dto.instanceId ?? null, url: dto.ariUrl ?? null, u: dto.ariUsername ?? null, secret: dto.ariPassword ? this.secrets.encrypt(dto.ariPassword) : null,
-          env: dto.environment, m: dto.maxConcurrentCalls, by: actor.userId },
+          env: dto.environment, m: dto.maxConcurrentCalls, ace: dto.autoCutEnabled ? 1 : 0, acs: dto.autoCutSeconds ?? null, by: actor.userId },
       );
       await this.audit.log(tx, { actorUserId: actor.userId, action: 'call_server.created', entityType: 'call_server', entityId: id, metadata: { name: dto.name } }, ctx);
       return this.load(tx, id);
@@ -127,7 +131,7 @@ export class CallServersService {
       const p: Record<string, unknown> = { id };
       const sets = buildSet(
         { name: 'name', host: 'host', port: 'port', sipTransport: 'sip_transport', sipWsPath: 'sip_ws_path', sipRealm: 'sip_realm', instanceId: 'instance_id',
-          ariUrl: 'ari_url', ariUsername: 'ari_username', environment: 'environment', maxConcurrentCalls: 'max_concurrent_calls', status: 'status' }, dto, p);
+          ariUrl: 'ari_url', ariUsername: 'ari_username', environment: 'environment', maxConcurrentCalls: 'max_concurrent_calls', status: 'status', autoCutEnabled: 'auto_cut_enabled', autoCutSeconds: 'auto_cut_seconds' }, dto, p);
       if (dto.ariPassword) { sets.push('ari_secret_encrypted = :secret'); p.secret = this.secrets.encrypt(dto.ariPassword); }
       if (addressChanged) sets.push('address_updated_at = UTC_TIMESTAMP(3)');
       if (ariChanged) sets.push(`connection_status = 'unknown'`, 'connection_checked_at = NULL', 'connection_error = NULL');

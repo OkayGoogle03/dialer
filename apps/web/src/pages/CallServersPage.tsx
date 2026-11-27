@@ -25,6 +25,8 @@ const fields = [
   { name: 'sipTransport', label: 'Transport', type: 'select' as const, options: TRANSPORTS },
   { name: 'sipWsPath', label: 'WebSocket path', hint: 'Usually /ws' },
   { name: 'sipRealm', label: 'SIP domain / realm (optional)', hint: 'Defaults to the server address. Set it if your PBX expects a domain name.' },
+  { name: 'autoCutEnabled', label: 'Auto cut unanswered calls', type: 'checkbox' as const },
+  { name: 'autoCutSeconds', label: 'Auto cut after (seconds, 1-120)', type: 'number' as const, hint: 'Used only when auto cut is ticked. Blank = system default (new server) or no change (edit). Unticked: calls ring normally until answered, rejected, hung up or ended by the call server.' },
 ];
 
 export function CallServersPage() {
@@ -61,7 +63,7 @@ export function CallServersPage() {
         Agents' softphones register with the call server listed here, using their own SIP ID (see SIP accounts below). The server's IP can change: edit the address and agents reconnect to the new one within a few minutes. Changing the address does not deactivate the server.
       </Notice>
       {msg && <Alert tone={msg.ok ? 'success' : 'error'}>{msg.text}</Alert>}
-      {form && <ConfigForm title={form === 'new' ? 'New call server' : `Edit ${form.name}`} fields={fields} initial={form === 'new' ? { sipTransport: 'wss', sipWsPath: '/ws' } : (form as unknown as Record<string, unknown>)}
+      {form && <ConfigForm title={form === 'new' ? 'New call server' : `Edit ${form.name}`} fields={fields} initial={form === 'new' ? { sipTransport: 'wss', sipWsPath: '/ws', autoCutEnabled: true } : (form as unknown as Record<string, unknown>)}
         submitLabel="Save call server" onCancel={() => setForm(null)}
         onSubmit={async (v) => { if (form === 'new') await api.post('/call-servers', v); else await api.put(`/call-servers/${form.id}`, v); setForm(null); await reload(); }} />}
       {manage && <BulkBar count={sel.selected.size} noun="call server" busy={bulkBusy} onDelete={deleteSelected} onClear={sel.clear} />}
@@ -70,6 +72,7 @@ export function CallServersPage() {
           ...(manage ? [selectColumn(items, (s: CallServerView) => s.id, sel)] : []),
           { key: 'n', header: 'Server', render: (s) => <><strong>{s.name}</strong><div className="hint">{s.webrtcUrl ?? (s.host ? `${s.sipTransport}://${s.host}${s.port ? `:${s.port}` : ''}` : 'SIP address not set')}</div></> },
           { key: 'm', header: 'Connection mode', render: (s) => <Badge tone={s.connectionMode === 'direct' ? 'ok' : undefined}>{MODE_LABEL[s.connectionMode ?? 'bridge']}</Badge> },
+          { key: 'c', header: 'Auto cut', render: (s) => (s.autoCutEnabled === false ? 'Off' : s.autoCutSeconds ? `After ${s.autoCutSeconds} s` : 'System default') },
           { key: 'u', header: 'Address updated', render: (s) => (s.addressUpdatedAt ? new Date(s.addressUpdatedAt).toLocaleString() : '—') },
           { key: 's', header: 'Status', render: (s) => <Badge tone={statusTone(s.status)}>{s.status === 'disabled' ? 'deactivated' : s.status.replace('_', ' ')}</Badge> },
           { key: 'a', header: '', render: (s) => manage && (

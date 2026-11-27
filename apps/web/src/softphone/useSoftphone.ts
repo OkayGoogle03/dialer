@@ -3,10 +3,11 @@ import { api } from '../api/client';
 import { errText } from '../components/kit';
 import { isNativeTransport, nativeAvailable, startNative } from './nativeEngine';
 import { createRejectionTracker, credentialRejectedMessage, isCredentialRejection } from './registrationRetry';
+import { createRingPlayer, ringLimitMs, ringSoundFor } from './ringing';
 
 export interface SoftphoneAccount {
   id: string; sipId: string; displayName: string | null; password: string;
-  callServer: { id: string; name: string; host: string | null; port: number | null; transport: string; connectionMode?: 'direct' | 'bridge'; wsPath: string; realm: string | null; webrtcUrl: string | null; addressUpdatedAt: string | null };
+  callServer: { id: string; name: string; host: string | null; port: number | null; transport: string; connectionMode?: 'direct' | 'bridge'; wsPath: string; realm: string | null; webrtcUrl: string | null; addressUpdatedAt: string | null; ringLimitSeconds?: number | null };
 }
 export interface DialOption { assignmentId: string; processId: string; processName: string; prefix: string; callServerId: string }
 export interface IceServer { urls: string | string[]; username?: string; credential?: string }
@@ -14,7 +15,7 @@ export interface SoftphoneConfig { accounts: SoftphoneAccount[]; dialOptions: Di
 
 export type RegState = 'idle' | 'connecting' | 'registered' | 'failed' | 'unavailable';
 export type CallState = 'idle' | 'dialing' | 'ringing' | 'in_call' | 'incoming';
-export interface ActiveCall { state: CallState; number: string; direction: 'out' | 'in'; startedAt: number | null; muted: boolean; callId: string | null; note: string | null; /** the note reports a normal / successful end (shown as a success message, not an error) */ noteOk?: boolean }
+export interface ActiveCall { state: CallState; number: string; direction: 'out' | 'in'; startedAt: number | null; muted: boolean; callId: string | null; note: string | null; /** the call server itself is sending ringing audio (183 with media), so no local ringback is played */ earlyMedia?: boolean; /** the note reports a normal / successful end (shown as a success message, not an error) */ noteOk?: boolean }
 
 const IDLE_CALL: ActiveCall = { state: 'idle', number: '', direction: 'out', startedAt: null, muted: false, callId: null, note: null };
 /** Agents pick up an admin's IP change within this time even if the connection never drops. */
@@ -57,6 +58,19 @@ export function useSoftphone() {
 
   const account = config?.accounts.find((a) => a.id === accountId) ?? config?.accounts[0];
   accountRef.current = account;
+
+  // ---- ringing on both sides: the caller hears a ringback, the person being called hears a ringtone
+  const ringer = useRef<ReturnType<typeof createRingPlayer> | null>(null);
+  ringer.current ??= createRingPlayer();
+  useEffect(() => {
+    // browsers only allow sound after the person has touched the page once
+    const unlock = () => ringer.current?.unlock();
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); ringer.current?.stop(); };
+  }, []);
+  const ringSound = ringSoundFor(call);
+  useEffect(() => { if (ringSound) ringer.current?.play(ringSound); else ringer.current?.stop(); }, [ringSound]);
 
   // ---- audio devices (browser calling): the agent's own microphone and speaker, remembered on this computer
   const store = (k: string, v?: string) => { try { if (v === undefined) return localStorage.getItem(k) ?? ''; if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch { /* storage blocked */ } return v ?? ''; };
@@ -112,20 +126,21 @@ export function useSoftphone() {
   const wireSession = useCallback((s: any, base: ActiveCall) => {
     session.current = s;
     setCall(base);
-    // Maximum ringing time at the called party (server setting, default 5 s): after that the call is cancelled and recorded as not answered.
-    const ringMs = Math.max(1, configRef.current?.ringTimeoutSeconds ?? 5) * 1000;
+    // Auto cut (set per call server): an unanswered outgoing call is cancelled after this time. null = off, it rings until the other side or the call server ends it.
+    const ringMs = ringLimitMs(accountRef.current?.callServer.ringLimitSeconds, configRef.current?.ringTimeoutSeconds);
     let ringTimer: ReturnType<typeof setTimeout> | null = null;
     let timedOut = false;
     const clearRing = () => { if (ringTimer) { clearTimeout(ringTimer); ringTimer = null; } };
-    const timeoutCause = () => (sawRinging ? `No answer within ${ringMs / 1000} s (ring limit)` : `No ringing within ${ringMs / 1000} s (the call server only sent progress / early media)`);
+    const timeoutCause = () => (sawRinging ? `No answer within ${(ringMs ?? 0) / 1000} s (ring limit)` : `No ringing within ${(ringMs ?? 0) / 1000} s (the call server only sent progress / early media)`);
     let sawRinging = false;
-    s.on('progress', () => {
+    s.on('progress', (e: any) => {
       // JsSIP also emits 'progress' for an INCOMING call when it sends its own 180 Ringing; that must not replace the Answer / Reject screen.
       if (base.direction === 'in') return;
       // 180 Ringing and 183 Session Progress (ringback / early media) both mean the call server is ringing the user's phone.
       if (!sawRinging) { sawRinging = true; track(base.callId, 'ringing'); }
-      setCall((c) => ({ ...c, state: 'ringing' }));
-      if (base.direction === 'out' && !ringTimer && !timedOut) ringTimer = setTimeout(() => { timedOut = true; try { s.terminate(); } catch { /* already ended */ } }, ringMs);
+      const early = e?.response?.status_code === 183 && !!e.response.body;
+      setCall((c) => ({ ...c, state: 'ringing', earlyMedia: c.earlyMedia || early }));
+      if (base.direction === 'out' && ringMs !== null && !ringTimer && !timedOut) ringTimer = setTimeout(() => { timedOut = true; try { s.terminate(); } catch { /* already ended */ } }, ringMs);
     });
     s.on('accepted', () => {
       clearRing();
