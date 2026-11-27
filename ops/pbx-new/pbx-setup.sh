@@ -267,6 +267,8 @@ stage_configure() {
   pub="$(public_ip)"; nat=""; ice=""
   if [ "$DRY" != 1 ] && [ -n "$pub" ] && ! local_ips | grep -qx "$pub"; then
     nets="$(ip -4 -o route show scope link 2>/dev/null | awk '{print $1}' | grep '/' | sort -u)"
+    # Google Cloud gives the interface a /32 and no subnet route: use the interface's own address(es) instead
+    [ -n "$nets" ] || nets="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | grep '/' | sort -u)"
     [ -n "$nets" ] || die "NAT detected but no local network found to put in local_net: set it by hand in pjsip_dialer.conf"
     nat="external_media_address=$pub
 external_signaling_address=$pub"

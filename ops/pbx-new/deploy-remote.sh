@@ -112,7 +112,7 @@ EOF
 step "6. validate from here (another network than the server)"
 if [ "$dry" = 1 ]; then echo "DRY-RUN: node scripts/check-pbx-wss.mjs $domain 8089 /ws ; audio test direct + through TURN"; exit 0; fi
 if [ "$novalidate" = 1 ]; then echo "validation skipped (--no-validate)"; [ -z "$tp4991" ] || ssh "${sshopt[@]}" "$target" "cd ~/pbx-kit/ops/pbx-new && sudo sh add-agent.sh --remove 4991 >/dev/null; sudo sh add-agent.sh --remove 4992 >/dev/null" || true; exit 0; fi
-node scripts/check-pbx-wss.mjs "$domain" 8089 /ws || { echo "SIGNALLING CHECK FAILED" >&2; exit 1; }
+MSYS_NO_PATHCONV=1 node scripts/check-pbx-wss.mjs "$domain" 8089 /ws || { echo "SIGNALLING CHECK FAILED" >&2; exit 1; }
 rc=0
 if [ "$have_e2e" = 1 ] && [ -n "$tp4991" ] && [ -n "$tp4992" ]; then
   ( cd scripts/e2e-audio
